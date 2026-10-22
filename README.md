@@ -90,9 +90,10 @@ was validated with.
 ## One-time host setup
 
 - **4× NVIDIA CMP 170HX, each exposing 64 GiB**, on **PCIe Gen2 x16 links**
-- **About 240 GiB of host RAM**: the model's Engram lookup tables (~203 GiB)
-  are held in memory. With less, set `VLLM_ENGRAM_PLACEMENT=ssd` to read them
-  from the SSD instead; that is slower and wants the checkpoints on an SSD
+- **About 240 GiB of host RAM**: the model's Engram lookup tables (~189 GiB)
+  are held in memory, and the server takes 202–204 GiB of host RAM in all.
+  With less, set `VLLM_ENGRAM_PLACEMENT=ssd` to read the tables from the SSD
+  instead; that is slower and wants the checkpoints on an SSD
   ([Host memory](docs/how-to-use.md#host-memory-and-the-engram-tables))
 - Linux with NVIDIA driver **580 or newer**
 - Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
@@ -129,9 +130,10 @@ aggregate rate of three runs, all on one boot.
 
 One user is streaming speed per request; eight users is the combined rate of
 eight simultaneous requests. Structured output and code are drafted well, so
-they decode fastest; prose least. DSpark drafts up to 5 tokens ahead for up to
-three users and 3 for four to eight. Method, quality and exact figures:
-[Results](docs/results.md).
+they decode fastest; prose least. DSpark drafts up to 7 tokens ahead for one
+user and 5 for more; from three users on, each step verifies only as many
+drafts as each request's recent acceptance makes worthwhile. Method, quality
+and exact figures: [Results](docs/results.md).
 
 ## Settings
 

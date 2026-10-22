@@ -13,7 +13,8 @@
   upstream vLLM's own kernels are better, and forcing these features on
   elsewhere is untested.
 - **Wide links for tensor-parallel.** See [Link width](how-to-use.md#link-width).
-- **Host memory.** The Engram tables take about 203 GiB of host RAM. With
+- **Host memory.** The Engram tables (~189 GiB) are held in host RAM, and the
+  server takes 202–204 GiB of it in all. With
   `VLLM_ENGRAM_PLACEMENT=ssd` they are read from the SSD instead; that runs on
   smaller hosts but is slower, and the published numbers were measured with
   the tables in RAM ([Host memory](how-to-use.md#host-memory-and-the-engram-tables)).

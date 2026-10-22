@@ -18,10 +18,11 @@ route each module to its format; the engine refuses a module no rule names.
 The build is deterministic, and the recipe checks its three written files
 against the bytes this release was validated with.
 
-The Engram tables (about 203 GiB, in the official checkpoint's last two
+The Engram tables (about 189 GiB, in the official checkpoint's last two
 shards) are not loaded onto the cards. Each card's process holds its share of
 the rows in host RAM and the cards fetch the rows a step needs; with
 `VLLM_ENGRAM_PLACEMENT=ssd` they are read from the checkpoint files instead.
+With the tables in RAM the server takes 202–204 GiB of host memory in all.
 
 ## What makes it fast, and correct
 
@@ -39,10 +40,13 @@ the rows in host RAM and the cards fetch the rows a step needs; with
   peer-to-peer, BF16 partial sums where they are exact enough, prefill
   all-reduces on a copy-engine ring and split in two so communication overlaps
   compute.
-- **Speculative decoding.** The checkpoint's DSpark drafter proposes up to five
-  tokens per step for up to three concurrent requests and three for more; the
-  model verifies them in the same step, so the output is the model's own.
-- **CUDA graphs** for decode steps up to 40 tokens wide, with room left for the
+- **Speculative decoding.** The checkpoint's DSpark drafter proposes up to seven
+  tokens per step while one request runs and up to five with more; from three
+  concurrent requests on, each step's verify width is chosen from each
+  request's recent acceptance, and a request keeps only the drafts worth
+  verifying. The model verifies them in the same step, so the output is the
+  model's own.
+- **CUDA graphs** for decode steps up to 48 tokens wide, with room left for the
   Engram row staging.
 - **Full-precision KV cache.** The KV cache is BF16; no 8-bit KV storage.
 
@@ -55,7 +59,7 @@ Every feature has a switch ([Engine switches](engine-switches.md)).
 | API | OpenAI-compatible, `http://127.0.0.1:8000/v1`; this machine only, no API key, unless you [change that](how-to-use.md#serving-other-machines) |
 | Model id | `dsv41-flash` |
 | Weights | the hybrid of [`LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw`](https://huggingface.co/LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw) (routed experts, EXL3 2.9 bpw) and [`deepseek-ai/DeepSeek-V4.1-Flash-1017`](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017) (everything else) |
-| Drafter | DSpark, inside the checkpoint: up to 5 draft tokens per step at one to three requests, 3 at four to eight |
+| Drafter | DSpark, inside the checkpoint: up to 7 draft tokens per step at one request, 5 at two to eight; from three requests the verify width is chosen per step |
 | Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`{{PIN}}`](https://github.com/Morrowmake/vllm-cmp170hx/commit/{{PIN}}), on upstream vLLM `4e0681ed56` |
 | Container image | `ghcr.io/morrowmake/vllm-cmp170hx:engine-{{PIN}}`, pinned by digest in `start.sh` — the engine at that pin and the release's launch, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4 with expert parallelism; assumes PCIe Gen2 x16 |

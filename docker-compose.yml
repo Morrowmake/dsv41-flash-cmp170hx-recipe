@@ -19,9 +19,10 @@
 # Checkpoints: in MODELS_DIR (from the shell or .env), ./models by default,
 # one plain directory per checkpoint, mounted read-only into the server.
 #
-# Host RAM: the Engram tables (~203 GiB) are held in host memory. On a host
-# with less, set VLLM_ENGRAM_PLACEMENT=ssd in docker/container.env (read from
-# the SSD the checkpoints are on; slower).
+# Host RAM: the Engram tables (~189 GiB) are held in host memory; the server
+# takes 202-204 GiB of it in all. On a host with less, set
+# VLLM_ENGRAM_PLACEMENT=ssd in docker/container.env (read from the SSD the
+# checkpoints are on; slower).
 #
 # ./start.sh does not use this file; use one or the other, not both at once
 # (they share the container name, so a second start fails rather than

@@ -8,9 +8,10 @@
 # API key unless you set API_KEY), DSpark speculative decoding, 262,144-token
 # context, tensor-parallel 4 with whole routed experts per card. The weights
 # are a hybrid: the routed experts from the EXL3 2.9 bpw export, every other
-# weight from DeepSeek's official FP8 checkpoint. The Engram tables (~203 GiB)
-# are held in host RAM; on a host with less memory they can be read from the
-# SSD instead (VLLM_ENGRAM_PLACEMENT=ssd, slower). No KV quantisation.
+# weight from DeepSeek's official FP8 checkpoint. The Engram tables (~189 GiB;
+# the server takes 202-204 GiB of host RAM in all) are held in host RAM; on a
+# host with less memory they can be read from the SSD instead
+# (VLLM_ENGRAM_PLACEMENT=ssd, slower). No KV quantisation.
 #
 # The engine runs in a container: Docker with the NVIDIA Container Toolkit,
 # image pinned by digest. docker-compose.yml runs the same container.
@@ -186,8 +187,9 @@ STOP_TIMEOUT="${STOP_TIMEOUT:-120}"
 MIN_GPUS="${MIN_GPUS:-4}"
 MIN_GPU_MIB="${MIN_GPU_MIB:-61440}"      # 60 GiB; the cards we run report 65,536 MiB
 NEED_DISK_GB="${NEED_DISK_GB:-680}"      # GiB, as df -BG counts it: checkpoints ~672 GiB
-# Host memory free for the Engram tables in RAM: ~203 GiB of tables plus the
-# engine's 2 GiB margin per card.
+# Host memory free for the Engram tables in RAM: the server takes 202-204 GiB
+# of host RAM with them (~189 GiB of tables), plus the engine's 2 GiB margin
+# per card.
 NEED_RAM_GIB="${NEED_RAM_GIB:-212}"
 LOCK_WAIT="${LOCK_WAIT:-30}"
 

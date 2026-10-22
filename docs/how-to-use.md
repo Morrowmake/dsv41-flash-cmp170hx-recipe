@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | GPUs | 4× NVIDIA CMP 170HX, **each exposing 64 GiB** (`nvidia-smi` shows 65,536 MiB), on **PCIe Gen2 x16 links**. Stock cards expose less memory and run at x4; getting to 64 GiB and x16 is outside this repository. The preflight stops before any download if a card reports under 60 GiB, and warns below x16 ([Link width](#link-width)) |
-| Host memory | **about 240 GiB**: the Engram tables (~203 GiB) are held in host RAM. With less, read them from the SSD instead ([Host memory and the Engram tables](#host-memory-and-the-engram-tables)) |
+| Host memory | **about 240 GiB**: the Engram tables (~189 GiB) are held in host RAM, and the server takes 202–204 GiB of it in all. With less, read the tables from the SSD instead ([Host memory and the Engram tables](#host-memory-and-the-engram-tables)) |
 | OS and driver | Linux (the commands below are for Ubuntu) with NVIDIA driver **580 or newer**; `nvidia-smi` must list all four cards |
 | Container runtime | Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), usable by your user, so that `docker run --rm --gpus all nvidia/cuda:13.3.1-base-ubuntu24.04 nvidia-smi` lists all four cards. This and the driver are a one-time host setup; the engine and its Python environment come in the image |
 | Tools | for `./start.sh`: `git`, `curl`, `flock` and `setsid` (util-linux, on most systems already), Python 3 for the boot check, `jq` for the smoke test. Docker Compose needs only Docker |
@@ -164,13 +164,14 @@ it does not repeat the boot check.
 
 ## Host memory and the Engram tables
 
-DeepSeek-V4.1 looks up two Engram tables for every token: about 203 GiB, the
+DeepSeek-V4.1 looks up two Engram tables for every token: about 189 GiB, the
 last two shards of the official checkpoint. This release holds them in host
 RAM (`VLLM_ENGRAM_PLACEMENT=ram`), split across the four cards' processes, and
-the cards fetch their rows from there. Before the start, the preflight checks
-that the host has about 212 GiB available (`NEED_RAM_GIB`); the engine checks
-again, with the container's memory limits, before it allocates, and refuses
-with the shortfall rather than running out of memory.
+the cards fetch their rows from there. With the tables in RAM the server takes
+202–204 GiB of host memory in all. Before the start, the preflight checks that
+the host has about 212 GiB available (`NEED_RAM_GIB`); the engine checks again,
+with the container's memory limits, before it allocates, and refuses with the
+shortfall rather than running out of memory.
 
 On a host with less memory, read the tables from the SSD instead:
 
@@ -179,9 +180,11 @@ VLLM_ENGRAM_PLACEMENT=ssd ./start.sh restart     # this run
 # or set VLLM_ENGRAM_PLACEMENT=ssd in .env (Docker Compose: in docker/container.env)
 ```
 
-That needs only a small row cache in RAM, but every step waits on SSD reads,
-so it is slower, and the published numbers do not apply. Keep `MODELS_DIR` on
-an SSD then.
+The release keeps no row cache (`VLLM_ENGRAM_ROW_CACHE_GIB=0`), so every
+lookup is read from the SSD; `VLLM_ENGRAM_ROW_CACHE_GIB` gives the SSD
+placement a row cache in host RAM, in GiB per card (for example `4`). Every
+step waits on SSD reads, so it is slower, and the published numbers do not
+apply. Keep `MODELS_DIR` on an SSD then.
 
 ## Where models are stored
 

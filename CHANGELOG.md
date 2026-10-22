@@ -17,11 +17,13 @@ First release: DeepSeek-V4.1-Flash-1017 on four CMP 170HX cards.
   of disk.
 - **Layout.** Tensor-parallel 4 with whole routed experts on each card;
   262,144-token context, up to 8 concurrent requests, BF16 KV cache.
-- **Engram tables in host RAM** (about 203 GiB; `VLLM_ENGRAM_PLACEMENT=ram`).
-  The preflight checks the host has room; `VLLM_ENGRAM_PLACEMENT=ssd` reads
-  them from the SSD on smaller hosts, slower.
-- **Speculative decoding** with the checkpoint's DSpark drafter: up to five
-  tokens per step for one to three requests, three for four to eight.
+- **Engram tables in host RAM** (about 189 GiB; the server takes 202–204 GiB
+  of host RAM in all; `VLLM_ENGRAM_PLACEMENT=ram`). The preflight checks the
+  host has room; `VLLM_ENGRAM_PLACEMENT=ssd` reads them from the SSD on
+  smaller hosts, slower.
+- **Speculative decoding** with the checkpoint's DSpark drafter: up to seven
+  tokens per step for one request and five for more; from three requests on,
+  each step's verify width is chosen from each request's recent acceptance.
 - **The launch is part of the image.** `/opt/recipe/serve.sh` holds the engine
   command and every serving default, generated from the release settings;
   `docker/entry.sh` checks peer access and runs the boot check before it.

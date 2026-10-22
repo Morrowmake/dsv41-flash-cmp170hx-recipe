@@ -38,6 +38,7 @@ unless the row says otherwise.
 
 | Switch | Release | What it does |
 |---|---|---|
+| `VLLM_DEEPSEEK_V41_FUSED_ATTN_DECODE` | `1` | the attention of a decode step in fewer kernel launches |
 | `VLLM_DEEPSEEK_V41_ATTN_PIPELINE` | `1` | the attention pipeline for decode-sized steps |
 | `VLLM_DEEPSEEK_V41_SELECT_ONE_LAUNCH` | `1` | the attention pipeline's index selection in one launch instead of fifteen |
 | `VLLM_DEEPSEEK_V41_SWA_META_BATCH` | `1` | the sliding-window metadata of every sliding-window KV cache group in one launch |
@@ -52,17 +53,26 @@ unless the row says otherwise.
 | `VLLM_EXL3_MOE_V2_FOLD` / `_RING` / `_DRAFT` | `1` | that kernel in three launches per call, its weight reads through a shared ring, and for the drafter's experts too; each needs `VLLM_EXL3_MOE_V2` |
 | `VLLM_DEEPSEEK_V41_MOE_PREFILL_TC` | `1` | EXL3 routed experts on the tensor cores for prefill calls of more than 64 rows |
 | `VLLM_EXL3_MOE_PREFILL_UNCHUNKED` | `1` | such a call of up to 2,048 rows as one launch sequence; needs `MOE_PREFILL_TC` |
+| `VLLM_EXL3_MOE_CHUNK_ROWS` | `2048` | routed-expert calls processed in chunks of up to 2,048 rows; the workspace is sized for it at startup |
 | `VLLM_EXL3_EXPERTS_CONTIGUOUS` | `1` | each card's routed experts stored contiguously, fixed at loading |
 | `VLLM_SM80_TARGET_SHARD_ARGMAX` / `VLLM_DSPARK_SHARD_ARGMAX` | `1` | greedy sampling of the model and of the drafter by an argmax over each card's share of the vocabulary |
 | `VLLM_DEEPSEEK_V41_ENGRAM_EARLY_GATHER` | `1` | Engram lookups started early on a second stream; needs full CUDA graphs for decode (the release's mode) |
 | `VLLM_DEEPSEEK_V41_ENGRAM_WKV_REPLICATED_PREFILL` | `1` | every card holds the whole Engram projection and projects prefill steps without gathering it |
+
+Speculative decoding:
+
+| Switch | Release | What it does |
+|---|---|---|
+| `VLLM_DSPARK_PER_K_WIDTH` | `1` | the drafter and the verify step built for the step's true width, so a narrower step costs less |
+| `VLLM_DSPARK_DEPTH_HINT` | `full=7,5;base=5,5` | seven drafts only while a single request runs, five otherwise |
+| `VLLM_DSPARK_ADAPTIVE_DEPTH` | the policy file shipped in the engine | from three requests on, each step's verify width chosen from each request's acceptance two rounds back; a request keeps only the drafts worth verifying, so greedy output is unchanged |
 
 Communication between the cards:
 
 | Switch | Release | What it does |
 |---|---|---|
 | `VLLM_CUSTOM_ALLREDUCE_PCIE_P2P` | `1` after a P2P pass, else `0` | the custom all-reduce over PCIe peer-to-peer |
-| `VLLM_CUSTOM_ALLREDUCE_FLAGS` / `_ALGO` / `_FLAGS_MAX_BYTES` | `1` / `2stage` / `409600` | its flags-in-data variant, two-stage, for messages up to 400 KiB |
+| `VLLM_CUSTOM_ALLREDUCE_FLAGS` / `_ALGO` / `_FLAGS_MAX_BYTES` | `1` / `2stage` / `524288` | its flags-in-data variant, two-stage, for messages up to 512 KiB |
 | `VLLM_HOST_ALLREDUCE` | `1` | a host-memory all-reduce for decode messages; stands aside while the peer-to-peer all-reduce serves |
 | `VLLM_DEEPSEEK_V41_WO_B_BF16_ALLREDUCE` / `_PREFILL_ALLREDUCE` | `1` | the attention output's partial sums all-reduced in BF16 instead of FP32, for decode and for prefill |
 | `VLLM_DEEPSEEK_V41_PREFILL_SPLIT_REDUCE` | `1` | prefill steps of 1,024 rows or more in two row slices, one slice's all-reduce beside the other's compute |
@@ -84,6 +94,6 @@ Memory and placement:
 
 These exist in the engine and are off in this release; they were not part of
 the measured configuration: `VLLM_DEEPSEEK_V41_MOE_ROUND_ONCE_ALLREDUCE`,
-`VLLM_ROUND_ONCE_ALLREDUCE_GROUPED`, `VLLM_DSPARK_PER_K_WIDTH`, an expert
-placement (`VLLM_EXL3_EXPERT_PLACEMENT`), and the diagnostic switches
-`VLLM_DEV_AB_SWITCH` and `VLLM_SM80_CAPTURE_DIR`.
+`VLLM_ROUND_ONCE_ALLREDUCE_GROUPED`, an expert placement
+(`VLLM_EXL3_EXPERT_PLACEMENT`), and the diagnostic switches `VLLM_DEV_AB_SWITCH`
+and `VLLM_SM80_CAPTURE_DIR`.

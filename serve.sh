@@ -5,42 +5,6 @@
 # CUDA_VISIBLE_DEVICES; every other inherited name but process plumbing is cleared.
 # DRY=1 prints the environment and the command and exits before exec.
 # The recipe start may also give VLLM_*, NCCL_*, EXTRA_ARGS, TMP, TEMP, the user inputs API_KEY, EXTRA_ARGS, HOST, MAX_BATCHED, MAX_SEQS, PORT, SERVED_MODEL_NAME and the locations CUDA_CACHE_PATH, FLASHINFER_WORKSPACE_BASE, HF_HOME, HOME, TILELANG_CACHE_DIR, TILELANG_TMP_DIR, TMPDIR, TORCHINDUCTOR_CACHE_DIR, TORCH_EXTENSIONS_DIR, TRITON_CACHE_DIR, VLLM_CACHE_ROOT, XDG_CACHE_HOME.
-# From: release/checklist.py generate-serve --model dsv41-flash --base rc1-1022.toml
-# Base rc1-1022.toml sha256 bb3b6ddb8b759a93e57b0f3d70c3c32af646337bcb9a94b26e12fa30d253e449
-# Variants, in order: candidate hybrid
-# set args.compilation-config="{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":[4,5,6,7,8,12,16,18,24,28,32,40]}"
-# set args.max-num-batched-tokens=2048
-# set args.max-num-partial-prefills=0
-# set args.prefill-chunk-with-decodes=0
-# set args.speculative-config="{\"method\":\"dspark\",\"num_speculative_tokens\":5,\"num_speculative_tokens_per_batch_size\":[[1,3,5],[4,8,3]],\"enable_adaptive_verification\":false}"
-# set env.VLLM_CUDAGRAPH_ESTIMATE_SPLIT="1"
-# set env.VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES="409600"
-# set env.VLLM_DEEPSEEK_V41_ATTN_PIPELINE="1"
-# set env.VLLM_DEEPSEEK_V41_DRAFT_PROLOGUE_FUSED="1"
-# set env.VLLM_DEEPSEEK_V41_ENGRAM_EARLY_GATHER="1"
-# set env.VLLM_DEEPSEEK_V41_ENGRAM_WKV_REPLICATED_PREFILL="1"
-# set env.VLLM_DEEPSEEK_V41_FUSED_ATTN_DECODE="1"
-# set env.VLLM_DEEPSEEK_V41_FUSED_MHC_FINISH_V2="1"
-# set env.VLLM_DEEPSEEK_V41_FUSED_ROUTE="1"
-# set env.VLLM_DEEPSEEK_V41_GATE_GEMV="1"
-# set env.VLLM_DEEPSEEK_V41_MHC_SIDE_STREAM="1"
-# set env.VLLM_DEEPSEEK_V41_MOE_PREFILL_TC="1"
-# set env.VLLM_DEEPSEEK_V41_PREFILL_CE_ALLREDUCE="1"
-# set env.VLLM_DEEPSEEK_V41_PREFILL_SPLIT_REDUCE="1"
-# set env.VLLM_DEEPSEEK_V41_ROUTER_MMA="1"
-# set env.VLLM_DEEPSEEK_V41_SELECT_ONE_LAUNCH="1"
-# set env.VLLM_DEEPSEEK_V41_SWA_META_BATCH="1"
-# set env.VLLM_DEEPSEEK_V41_WO_A_GROUPED_GEMM="1"
-# set env.VLLM_DEEPSEEK_V41_WO_B_BF16_PREFILL_ALLREDUCE="1"
-# set env.VLLM_DSPARK_PER_K_WIDTH="0"
-# set env.VLLM_DSPARK_SHARD_ARGMAX="1"
-# set env.VLLM_ENGRAM_PLACEMENT="ram"
-# set env.VLLM_ENGRAM_ROW_CACHE_GIB="0"
-# set env.VLLM_EXL3_MOE_PREFILL_UNCHUNKED="1"
-# set env.VLLM_EXL3_MOE_V2_DRAFT="1"
-# set env.VLLM_EXL3_MOE_V2_FOLD="1"
-# set env.VLLM_EXL3_MOE_V2_RING="1"
-# set env.VLLM_SM80_TARGET_SHARD_ARGMAX="1"
 set -euo pipefail
 [ $# -eq 0 ] || { echo "the reference launcher takes no arguments: $*" >&2; exit 2; }
 layout=${LAYOUT:?the caller names the layout}
@@ -111,7 +75,7 @@ case "$layout" in
     export VLLM_CUDAGRAPH_ESTIMATE_SPLIT=${VLLM_CUDAGRAPH_ESTIMATE_SPLIT-1}
     export VLLM_CUSTOM_ALLREDUCE_ALGO=${VLLM_CUSTOM_ALLREDUCE_ALGO-2stage}
     export VLLM_CUSTOM_ALLREDUCE_FLAGS=${VLLM_CUSTOM_ALLREDUCE_FLAGS-1}
-    export VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES=${VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES-409600}
+    export VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES=${VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES-524288}
     export VLLM_CUSTOM_ALLREDUCE_PCIE_P2P=${VLLM_CUSTOM_ALLREDUCE_PCIE_P2P-1}
     export VLLM_DEEPSEEK_V41_ATTN_PIPELINE=${VLLM_DEEPSEEK_V41_ATTN_PIPELINE-1}
     export VLLM_DEEPSEEK_V41_DRAFT_PROLOGUE_FUSED=${VLLM_DEEPSEEK_V41_DRAFT_PROLOGUE_FUSED-1}
@@ -135,7 +99,9 @@ case "$layout" in
     export VLLM_DEEPSEEK_V41_WO_B_BF16_ALLREDUCE=${VLLM_DEEPSEEK_V41_WO_B_BF16_ALLREDUCE-1}
     export VLLM_DEEPSEEK_V41_WO_B_BF16_PREFILL_ALLREDUCE=${VLLM_DEEPSEEK_V41_WO_B_BF16_PREFILL_ALLREDUCE-1}
     export VLLM_DEV_AB_SWITCH=${VLLM_DEV_AB_SWITCH-''}
-    export VLLM_DSPARK_PER_K_WIDTH=${VLLM_DSPARK_PER_K_WIDTH-0}
+    export VLLM_DSPARK_ADAPTIVE_DEPTH=${VLLM_DSPARK_ADAPTIVE_DEPTH-/opt/vllm-src/vllm/models/deepseek_v41/nvidia/dspark_depth_policy.json}
+    export VLLM_DSPARK_DEPTH_HINT=${VLLM_DSPARK_DEPTH_HINT-'full=7,5;base=5,5'}
+    export VLLM_DSPARK_PER_K_WIDTH=${VLLM_DSPARK_PER_K_WIDTH-1}
     export VLLM_DSPARK_SHARD_ARGMAX=${VLLM_DSPARK_SHARD_ARGMAX-1}
     export VLLM_ENGRAM_PLACEMENT=${VLLM_ENGRAM_PLACEMENT-ram}
     export VLLM_ENGRAM_ROW_CACHE_GIB=${VLLM_ENGRAM_ROW_CACHE_GIB-0}
@@ -165,6 +131,7 @@ case "$layout" in
       --max-model-len 262144 \
       --gpu-memory-utilization 0.95 \
       --max-num-seqs "${MAX_SEQS:-8}" \
+      --max-num-batched-tokens "${MAX_BATCHED:-2048}" \
       --port "${port:-8001}" \
       --hf-overrides '{"engram_table_dir":"/models/DeepSeek-V4.1-Flash-1017-engram"}' \
       --load-format exl3 \
@@ -174,11 +141,8 @@ case "$layout" in
       --reasoning-parser deepseek_v41 \
       --enable-auto-tool-choice \
       --tool-call-parser deepseek_v41 \
-      --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,5,6,7,8,12,16,18,24,28,32,40]}' \
-      --max-num-batched-tokens "${MAX_BATCHED:-2048}" \
-      --max-num-partial-prefills 0 \
-      --prefill-chunk-with-decodes 0 \
-      --speculative-config '{"method":"dspark","num_speculative_tokens":5,"num_speculative_tokens_per_batch_size":[[1,3,5],[4,8,3]],"enable_adaptive_verification":false}' \
+      --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[2,3,4,5,6,8,9,10,12,14,15,16,18,20,21,24,25,28,30,32,35,36,40,42,48]}' \
+      --speculative-config '{"method":"dspark","num_speculative_tokens":7,"adaptive_k":{"by_load":[7,5,5,5,5,5,5,5,1,2,3,4,5],"draft_by_load":true},"enable_adaptive_verification":false}' \
       --tensor-parallel-size 4 \
       --pipeline-parallel-size 1)
     if [ -n "${EXTRA_ARGS:-}" ]; then read -ra _extra <<< "$EXTRA_ARGS"; argv+=("${_extra[@]}"); fi
