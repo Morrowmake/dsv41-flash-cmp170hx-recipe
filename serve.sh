@@ -1,9 +1,9 @@
 #!/bin/bash
 # Generated at release time from the model's settings launch (the container runtime; tools
 # release/checklist.py generate-serve). The release checklist regenerates it and refuses any
-# difference: do not edit. The session gives LAYOUT, and may give PORT, HOST and
+# difference: do not edit. The caller gives LAYOUT, and may give PORT, HOST and
 # CUDA_VISIBLE_DEVICES; every other inherited name but process plumbing is cleared.
-# DRY=1 (the session protocol) prints the environment and the command and exits before exec.
+# DRY=1 prints the environment and the command and exits before exec.
 # The recipe start may also give VLLM_*, NCCL_*, EXTRA_ARGS and the user inputs API_KEY, EXTRA_ARGS, HOST, MAX_BATCHED, MAX_SEQS, PORT, SERVED_MODEL_NAME.
 # From: release/checklist.py generate-serve --model dsv41-flash --base rc1-1022.toml
 # Base rc1-1022.toml sha256 bb3b6ddb8b759a93e57b0f3d70c3c32af646337bcb9a94b26e12fa30d253e449
@@ -43,14 +43,14 @@
 # set env.VLLM_SM80_TARGET_SHARD_ARGMAX="1"
 set -euo pipefail
 [ $# -eq 0 ] || { echo "the reference launcher takes no arguments: $*" >&2; exit 2; }
-layout=${LAYOUT:?the session names the layout}
+layout=${LAYOUT:?the caller names the layout}
 port=${PORT:-}
 host=${HOST:-}
 cvd_set=${CUDA_VISIBLE_DEVICES+1}
 cvd=${CUDA_VISIBLE_DEVICES:-}
 dry=${DRY:-${DRY_RUN:-0}}
 for _name in $(compgen -e); do
-  case "$_name" in GPU_LOCK_*|GPU_RAM_*|RAM_*|SESSION_JOB|GPU_QUEUE_JOB|TMPDIR|VLLM_*|NCCL_*|EXTRA_ARGS|API_KEY|EXTRA_ARGS|HOST|MAX_BATCHED|MAX_SEQS|PORT|SERVED_MODEL_NAME) ;; *) unset "$_name" 2>/dev/null || true ;; esac
+  case "$_name" in VLLM_*|NCCL_*|EXTRA_ARGS|API_KEY|HOST|MAX_BATCHED|MAX_SEQS|PORT|SERVED_MODEL_NAME) ;; *) unset "$_name" 2>/dev/null || true ;; esac
 done
 [[ -z "${MAX_BATCHED:-}" || "$MAX_BATCHED" =~ ^[0-9]+$ ]] || { echo "MAX_BATCHED=$MAX_BATCHED: not an integer" >&2; exit 2; }
 [[ -z "${MAX_SEQS:-}" || "$MAX_SEQS" =~ ^[0-9]+$ ]] || { echo "MAX_SEQS=$MAX_SEQS: not an integer" >&2; exit 2; }
