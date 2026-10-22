@@ -1,0 +1,90 @@
+name: Bug report
+description: Something does not install, start, serve or answer as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The details below let us reproduce it on the same setup.
+        Remove API keys, tokens and anything private from logs before pasting.
+  - type: input
+    id: version
+    attributes:
+      label: Recipe version
+      description: Output of `git describe --tags` in your checkout (and the `install:` line of `./start.sh status`).
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: p2p
+    attributes:
+      label: PCIe peer-to-peer
+      description: The P2P setting, and the last `[p2p]` line of `logs/serve.log`
+      options:
+        - auto (default), check passed
+        - auto (default), check did not pass
+        - off
+        - force
+    validations:
+      required: true
+  - type: dropdown
+    id: engram
+    attributes:
+      label: Engram tables
+      description: VLLM_ENGRAM_PLACEMENT
+      options:
+        - ram (default)
+        - ssd
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options:
+        - ./start.sh (default)
+        - docker compose
+        - docker run by hand
+    validations:
+      required: true
+  - type: input
+    id: driver
+    attributes:
+      label: NVIDIA driver version
+      placeholder: "580.xx"
+    validations:
+      required: true
+  - type: textarea
+    id: nvidia-smi
+    attributes:
+      label: nvidia-smi output
+      description: Output of `nvidia-smi` (and, for link-width or host-memory questions, the preflight lines of `./start.sh`).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+      description: The command you ran, what it printed, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log excerpt
+      description: The relevant part of the `./start.sh` output and of `logs/serve.log` (the last start; `./start.sh logs` follows it).
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: kv
+    attributes:
+      label: KV line
+      description: The `KV:` line of `./start.sh status`, or the "GPU KV cache size" line in `logs/serve.log`.
+  - type: textarea
+    id: env
+    attributes:
+      label: Settings changed from the defaults
+      description: Uncommented lines of your `.env` (without API_KEY or HF_TOKEN values).
+      render: text

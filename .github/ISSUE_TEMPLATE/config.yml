@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: README
+    url: https://github.com/Morrowmake/dsv41-flash-cmp170hx-recipe#readme
+    about: Requirements, quick start and links to the full documentation.
+  - name: Known limits
+    url: https://github.com/Morrowmake/dsv41-flash-cmp170hx-recipe/blob/main/docs/known-limits.md
+    about: Check here first; your question may already be answered.

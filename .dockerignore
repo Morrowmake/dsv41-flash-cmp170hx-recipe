@@ -1,0 +1,14 @@
+*
+!docker/
+!docker/CONSTRAINTS
+!docker/Dockerfile
+!docker/runtime_tree.py
+!docker/payload.py
+!docker/cache_seed.py
+!docker/rootfs_smoke.py
+!docker/bwrap_targets.py
+!docker/p2p_build.py
+!p2p_probe.cu
+!docker/native_build.py
+!docker/native/
+!serve.sh

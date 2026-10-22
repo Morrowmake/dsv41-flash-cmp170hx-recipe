@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If this recipe helps you, please cite it."
+title: "DeepSeek-V4.1-Flash on 4x NVIDIA CMP 170HX: a serving recipe"
+authors:
+  - name: Morrowmake
+repository-code: "https://github.com/Morrowmake/dsv41-flash-cmp170hx-recipe"
+license: MIT
+version: {{VERSION}}
+date-released: {{RELEASE_DATE}}

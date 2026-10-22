@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest a change to the recipe, its settings or its documentation.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The use case, and what stops you today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The change you have in mind, if any.
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Hardware, host memory, workload or links that help explain the request.

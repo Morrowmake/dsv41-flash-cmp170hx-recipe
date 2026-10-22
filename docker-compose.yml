@@ -1,0 +1,99 @@
+# The same container ./start.sh launches, as one command from a fresh clone:
+#
+#   docker compose up              # download the checkpoints, then serve
+#   docker compose up -d           # the same in the background
+#   docker compose ps              # the server shows (healthy) once /health answers
+#   docker compose logs -f         # follow it
+#   docker compose down            # stop (allows 120 s for a clean shutdown)
+#
+# `prepare` runs first and must finish: it makes ./cache and the three model
+# directories writable by the serving user, downloads the two checkpoints
+# (~672 GiB; resumed if interrupted, skipped once complete) and builds the
+# hybrid checkpoint from them as links. The serving user is whoever owns this
+# checkout, so no user settings are needed; HOST_UID and HOST_GID override it.
+# The server then starts as that user, never as root, with the release image
+# (its serve.sh is the release launch) and docker/container.env, as ./start.sh
+# does. The one-time host setup (driver, Docker, NVIDIA Container Toolkit) is
+# in the README.
+#
+# Checkpoints: in MODELS_DIR (from the shell or .env), ./models by default,
+# one plain directory per checkpoint, mounted read-only into the server.
+#
+# Host RAM: the Engram tables (~203 GiB) are held in host memory. On a host
+# with less, set VLLM_ENGRAM_PLACEMENT=ssd in docker/container.env (read from
+# the SSD the checkpoints are on; slower).
+#
+# ./start.sh does not use this file; use one or the other, not both at once
+# (they share the container name, so a second start fails rather than
+# doubling up on the cards). MODELS_DIR and HF_TOKEN are read from the shell or
+# from .env; every other setting goes in docker/container.env. The API is
+# published on 127.0.0.1:8000 only and has no API key.
+
+x-image: &image ${IMAGE:-ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{IMAGE_DIGEST}}}
+
+services:
+  prepare:
+    image: *image
+    user: "0:0"
+    entrypoint: ["/bin/bash", "/recipe/prepare.sh"]
+    command: ["prepare"]
+    environment:
+      HOST_UID: ${HOST_UID:-}
+      HOST_GID: ${HOST_GID:-}
+      HF_TOKEN:
+      HF_HOME: /tmp/hf
+    volumes:
+      - ./docker/prepare.sh:/recipe/prepare.sh:ro
+      - .:/checkout:ro
+      - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw:/models/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw
+      - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017:/models/DeepSeek-V4.1-Flash-1017-engram
+      - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8:/models/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8
+      - ./cache:/cache
+
+  dsv41-flash:
+    image: *image
+    container_name: dsv41-flash
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    # Starts as root only to switch to the owner of /cache (the serving user
+    # prepare chose) before docker/entry.sh runs.
+    user: "0:0"
+    working_dir: /cache
+    entrypoint: ["/bin/bash", "/recipe/prepare.sh", "serve"]
+    shm_size: 16g
+    stop_grace_period: 120s
+    # Back after a crash (a non-zero exit), up to 3 times; never after
+    # docker compose stop/down.
+    restart: on-failure:3
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - docker/container.env
+    environment:
+      RECIPE_CACHE_ROOT: /cache
+      TMPDIR: /cache/tmp
+    volumes:
+      - ./docker/prepare.sh:/recipe/prepare.sh:ro
+      - ./docker/entry.sh:/recipe/entry.sh:ro
+      - ./boot_check.py:/recipe/boot_check.py:ro
+      - ./p2p_check.py:/recipe/p2p_check.py:ro
+      - ./p2p_check.sh:/recipe/p2p_check.sh:ro
+      - ./p2p_probe.cu:/recipe/p2p_probe.cu:ro
+      - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw:/models/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw:ro
+      - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017:/models/DeepSeek-V4.1-Flash-1017-engram:ro
+      - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8:/models/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8:ro
+      - ./cache:/cache
+    healthcheck:
+      test: ["CMD", "/opt/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 3600s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

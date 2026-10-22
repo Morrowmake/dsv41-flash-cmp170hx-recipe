@@ -1,0 +1,23 @@
+# Local configuration, copied from .env.example on first run
+.env
+
+# Checkpoints (~672 GiB) and the hybrid built from them -- ./download.sh
+models/
+
+# Environment built by ./install.sh
+venv/
+vllm-src/
+
+# Server output, pid and lock files
+logs/*
+!logs/.gitkeep
+
+__pycache__/
+*.pyc
+.DS_Store
+
+# Container: image build output (docker/build.sh) and compile caches
+docker/out/
+# Native extension files from docker/native_build.py, packed by the Dockerfile
+docker/native/
+cache/
