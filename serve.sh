@@ -4,7 +4,7 @@
 # difference: do not edit. The caller gives LAYOUT, and may give PORT, HOST and
 # CUDA_VISIBLE_DEVICES; every other inherited name but process plumbing is cleared.
 # DRY=1 prints the environment and the command and exits before exec.
-# The recipe start may also give VLLM_*, NCCL_*, EXTRA_ARGS and the user inputs API_KEY, EXTRA_ARGS, HOST, MAX_BATCHED, MAX_SEQS, PORT, SERVED_MODEL_NAME.
+# The recipe start may also give VLLM_*, NCCL_*, EXTRA_ARGS, TMP, TEMP, the user inputs API_KEY, EXTRA_ARGS, HOST, MAX_BATCHED, MAX_SEQS, PORT, SERVED_MODEL_NAME and the locations CUDA_CACHE_PATH, FLASHINFER_WORKSPACE_BASE, HF_HOME, HOME, TILELANG_CACHE_DIR, TILELANG_TMP_DIR, TMPDIR, TORCHINDUCTOR_CACHE_DIR, TORCH_EXTENSIONS_DIR, TRITON_CACHE_DIR, VLLM_CACHE_ROOT, XDG_CACHE_HOME.
 # From: release/checklist.py generate-serve --model dsv41-flash --base rc1-1022.toml
 # Base rc1-1022.toml sha256 bb3b6ddb8b759a93e57b0f3d70c3c32af646337bcb9a94b26e12fa30d253e449
 # Variants, in order: candidate hybrid
@@ -50,20 +50,20 @@ cvd_set=${CUDA_VISIBLE_DEVICES+1}
 cvd=${CUDA_VISIBLE_DEVICES:-}
 dry=${DRY:-${DRY_RUN:-0}}
 for _name in $(compgen -e); do
-  case "$_name" in VLLM_*|NCCL_*|EXTRA_ARGS|API_KEY|HOST|MAX_BATCHED|MAX_SEQS|PORT|SERVED_MODEL_NAME) ;; *) unset "$_name" 2>/dev/null || true ;; esac
+  case "$_name" in VLLM_*|NCCL_*|EXTRA_ARGS|TMP|TEMP|CUDA_CACHE_PATH|FLASHINFER_WORKSPACE_BASE|HF_HOME|HOME|TILELANG_CACHE_DIR|TILELANG_TMP_DIR|TMPDIR|TORCHINDUCTOR_CACHE_DIR|TORCH_EXTENSIONS_DIR|TRITON_CACHE_DIR|VLLM_CACHE_ROOT|XDG_CACHE_HOME|API_KEY|HOST|MAX_BATCHED|MAX_SEQS|PORT|SERVED_MODEL_NAME) ;; *) unset "$_name" 2>/dev/null || true ;; esac
 done
 [[ -z "${MAX_BATCHED:-}" || "$MAX_BATCHED" =~ ^[0-9]+$ ]] || { echo "MAX_BATCHED=$MAX_BATCHED: not an integer" >&2; exit 2; }
 [[ -z "${MAX_SEQS:-}" || "$MAX_SEQS" =~ ^[0-9]+$ ]] || { echo "MAX_SEQS=$MAX_SEQS: not an integer" >&2; exit 2; }
 [[ -z "${PORT:-}" || "$PORT" =~ ^[0-9]+$ ]] || { echo "PORT=$PORT: not an integer" >&2; exit 2; }
 case "$layout" in
   tp4)
-    export CUDA_CACHE_PATH=/cache/.nv/ComputeCache
+    export CUDA_CACHE_PATH=${CUDA_CACHE_PATH:-/cache/.nv/ComputeCache}
     export CUDA_DEVICE_ORDER=PCI_BUS_ID
     export CUDA_HOME=/usr/local/cuda
     export CUDA_VERSION=13.3.1
-    export FLASHINFER_WORKSPACE_BASE=/cache
-    export HF_HOME=/cache/huggingface
-    export HOME=/cache
+    export FLASHINFER_WORKSPACE_BASE=${FLASHINFER_WORKSPACE_BASE:-/cache}
+    export HF_HOME=${HF_HOME:-/cache/huggingface}
+    export HOME=${HOME:-/cache}
     export LC_CTYPE=C.UTF-8
     export LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64
     export LIBRARY_PATH=/usr/local/cuda/lib64/stubs
@@ -100,12 +100,12 @@ case "$layout" in
     export PYTHONDONTWRITEBYTECODE=1
     export PYTHONNOUSERSITE=1
     export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False
-    export TILELANG_CACHE_DIR=/cache/.tilelang/cache
-    export TILELANG_TMP_DIR=/cache/.tilelang/cache/tmp
-    export TMPDIR=/cache/tmp
-    export TORCHINDUCTOR_CACHE_DIR=/cache/torchinductor
-    export TORCH_EXTENSIONS_DIR=/cache/.cache/torch_extensions
-    export TRITON_CACHE_DIR=/cache/.triton/cache
+    export TILELANG_CACHE_DIR=${TILELANG_CACHE_DIR:-/cache/.tilelang/cache}
+    export TILELANG_TMP_DIR=${TILELANG_TMP_DIR:-/cache/.tilelang/cache/tmp}
+    export TMPDIR=${TMPDIR:-/cache/tmp}
+    export TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-/cache/torchinductor}
+    export TORCH_EXTENSIONS_DIR=${TORCH_EXTENSIONS_DIR:-/cache/.cache/torch_extensions}
+    export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/cache/.triton/cache}
     export VIRTUAL_ENV=/opt/venv
     export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT-/cache/.cache/vllm}
     export VLLM_CUDAGRAPH_ESTIMATE_SPLIT=${VLLM_CUDAGRAPH_ESTIMATE_SPLIT-1}
@@ -154,7 +154,7 @@ case "$layout" in
     export VLLM_SM80_CAPTURE_DIR=${VLLM_SM80_CAPTURE_DIR-''}
     export VLLM_SM80_TARGET_SHARD_ARGMAX=${VLLM_SM80_TARGET_SHARD_ARGMAX-1}
     export VLLM_USE_BREAKABLE_CUDAGRAPH=${VLLM_USE_BREAKABLE_CUDAGRAPH-1}
-    export XDG_CACHE_HOME=/cache/.cache
+    export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/cache/.cache}
     if [ -n "${API_KEY+1}" ]; then export VLLM_API_KEY="$API_KEY"; fi
     if [ -n "$cvd_set" ]; then export CUDA_VISIBLE_DEVICES="$cvd"; else export CUDA_VISIBLE_DEVICES=0,1,2,3; fi
     argv=(/opt/venv/bin/vllm \
