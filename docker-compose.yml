@@ -19,10 +19,11 @@
 # Checkpoints: in MODELS_DIR (from the shell or .env), ./models by default,
 # one plain directory per checkpoint, mounted read-only into the server.
 #
-# Host RAM: the Engram tables (~189 GiB) are held in host memory; the server
-# takes 202-204 GiB of it in all. On a host with less, set
-# VLLM_ENGRAM_PLACEMENT=ssd in docker/container.env (read from the SSD the
-# checkpoints are on; slower).
+# Host RAM: the Engram tables (~189 GiB) are held in host memory when the
+# container has ~212 GiB available (the server takes 202-204 GiB in all), and
+# read from the SSD the checkpoints are on when it has not (slower; keep
+# MODELS_DIR on an SSD). The server's log says which, at every start;
+# VLLM_ENGRAM_PLACEMENT=ram or ssd in docker/container.env chooses directly.
 #
 # ./start.sh does not use this file; use one or the other, not both at once
 # (they share the container name, so a second start fails rather than
@@ -81,6 +82,7 @@ services:
       - ./p2p_check.py:/recipe/p2p_check.py:ro
       - ./p2p_check.sh:/recipe/p2p_check.sh:ro
       - ./p2p_probe.cu:/recipe/p2p_probe.cu:ro
+      - ./engram_placement.sh:/recipe/engram_placement.sh:ro
       - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw:/models/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw:ro
       - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017:/models/DeepSeek-V4.1-Flash-1017-engram:ro
       - ${MODELS_DIR:-./models}/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8:/models/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8:ro

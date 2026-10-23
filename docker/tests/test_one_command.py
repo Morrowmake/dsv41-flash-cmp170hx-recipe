@@ -48,7 +48,8 @@ def test_compose_runs_the_start_container_after_prepare():
     assert server['entrypoint'] == ['/bin/bash', '/recipe/prepare.sh', 'serve']
     assert 'command' not in server and server['shm_size'] == '16g'
     assert server['env_file'] == ['docker/container.env']
-    for name in ('docker/entry.sh', 'boot_check.py', 'p2p_check.py', 'p2p_check.sh', 'p2p_probe.cu'):
+    for name in ('docker/entry.sh', 'boot_check.py', 'p2p_check.py', 'p2p_check.sh', 'p2p_probe.cu',
+                 'engram_placement.sh'):
         assert f'./{name}:/recipe/{name.split("/")[-1]}:ro' in server['volumes']
     for host, mount in zip(HOSTS, MODELS):
         assert f'${{MODELS_DIR:-./models}}/{host}:/models/{mount}' in prepare['volumes']
@@ -277,9 +278,10 @@ def run_start(root, body, **env):
     script.write_text(source + body)
     (root / 'docker').mkdir(exist_ok=True)
     (root / 'docker' / 'prepare.sh').write_text(PREPARE.read_text())
+    (root / 'engram_placement.sh').write_text((ROOT / 'engram_placement.sh').read_text())
     if not (root / '.env.example').exists():
         (root / '.env.example').write_text('')
-    clean = {k: v for k, v in os.environ.items() if not k.startswith(('VLLM_', 'NCCL_', 'MODELS_DIR'))}
+    clean = {k: v for k, v in os.environ.items() if not k.startswith(('VLLM_', 'NCCL_', 'MODELS_DIR', 'NEED_RAM_GIB'))}
     return subprocess.run(['bash', str(script)], capture_output=True, text=True,
                           env=dict(clean, HOME=str(root / 'home'), CUDA_VISIBLE_DEVICES='', **env), timeout=60)
 
@@ -320,22 +322,85 @@ def test_container_runs_the_entry_with_read_only_checkpoints(tmp_path):
     assert not any('serve.sh' in a for a in out)
 
 
-@pytest.mark.parametrize('placement,avail_kb,ok', [('ram', 300 * 1048576, True), ('ram', 100 * 1048576, False),
-                                                   ('ssd', 100 * 1048576, True)])
-def test_host_memory_for_the_engram_tables(tmp_path, placement, avail_kb, ok):
-    meminfo = tmp_path / 'meminfo'
-    meminfo.write_text(f'MemTotal: {avail_kb * 2} kB\nMemAvailable: {avail_kb} kB\n')
-    body = 'server_is_ours() { return 1; }\nawk() { command awk "$1" ' + str(meminfo) + '; }\npreflight_ram\n'
-    run = run_start(tmp_path, body, VLLM_ENGRAM_PLACEMENT=placement)
+def host_memory(root, avail_gib):
+    """Fake /proc/meminfo and an empty cgroup directory (no limit) for engram_placement.sh."""
+    (root / 'meminfo').write_text(f'MemTotal: {512 * 1048576} kB\nMemAvailable: {avail_gib * 1048576} kB\n')
+    (root / 'cgroup').mkdir(exist_ok=True)
+    return {'RECIPE_MEMINFO': str(root / 'meminfo'), 'RECIPE_CGROUP': str(root / 'cgroup')}
+
+
+PREFLIGHT = 'server_is_ours() { return 1; }\npreflight_ram\necho "where=$(engram_where)"\n'
+SSD_100 = ('Engram tables: ssd (auto: 100 GiB available, RAM placement needs ~212 GiB; slower), '
+           'row cache 17 GiB per card, filled at start, direct reads')
+
+
+@pytest.mark.parametrize('placement,avail,ok,line', [
+    (None, 300, True, 'Engram tables: ram (auto: 300 GiB available, RAM placement needs ~212 GiB)'),
+    (None, 100, True, SSD_100),
+    ('auto', 64, True, 'row cache 8 GiB per card, not filled at start (under 12 GiB), direct reads'),
+    ('ram', 300, True, 'Engram tables: ram (VLLM_ENGRAM_PLACEMENT=ram: 300 GiB available'),
+    ('ram', 100, False, None),
+    ('ssd', 100, True, 'Engram tables: ssd (VLLM_ENGRAM_PLACEMENT=ssd: 100 GiB available'),
+])
+def test_host_memory_for_the_engram_tables(tmp_path, placement, avail, ok, line):
+    """auto decides as the container's entry will and never stops; an explicit ram stops below the need."""
+    settings = host_memory(tmp_path, avail)
+    if placement:
+        settings['VLLM_ENGRAM_PLACEMENT'] = placement
+    run = run_start(tmp_path, PREFLIGHT, **settings)
     assert (run.returncode == 0) is ok, run.stdout + run.stderr
-    if not ok:
-        assert 'VLLM_ENGRAM_PLACEMENT=ssd' in run.stderr
-        dry = run_start(tmp_path, body, VLLM_ENGRAM_PLACEMENT=placement, DRY='1')
+    if ok:
+        assert line in run.stdout
+        where = {(None, 300): 'ram (auto)', (None, 100): 'ssd (auto)', ('auto', 64): 'ssd (auto)',
+                 ('ram', 300): 'ram', ('ssd', 100): 'ssd'}[placement, avail]
+        assert f'where={where}\n' in run.stdout
+    else:
+        assert 'VLLM_ENGRAM_PLACEMENT=ssd' in run.stderr and '100 GiB available' in run.stderr
+        dry = run_start(tmp_path, PREFLIGHT, DRY='1', **settings)
         assert dry.returncode == 0 and 'not fatal under DRY' in dry.stderr
 
 
+def test_launch_line_names_the_decision(tmp_path):
+    """The launch log line reads engram_where; before a decision it is the setting."""
+    start = (ROOT / 'start.sh').read_text()
+    assert 'Engram tables in $(engram_where), $(publish_addr)' in start
+    run = run_start(tmp_path, 'echo "where=$(engram_where)"\n')
+    assert 'where=auto\n' in run.stdout
+
+
+def test_dry_launch_names_the_decision_and_keeps_the_launch(tmp_path):
+    """DRY says what the entry will decide; the launch it prints stays the release's own, whatever the host's
+    memory, so a recipe DRY fixture does not depend on it."""
+    (tmp_path / 'serve.sh').write_text('#!/bin/bash\nenv | grep ^VLLM_ENGRAM_ | sort\necho served\n')
+    body = 'server_is_ours() { return 1; }\ncontainer_image_present() { return 1; }\npreflight_ram\ncontainer_launch\n'
+    run = run_start(tmp_path, body, DRY='1', **host_memory(tmp_path, 100))
+    assert run.returncode == 0, run.stderr
+    assert "serve.sh would run (the entry first sets the Engram placement: ssd)" in run.stdout
+    assert '    served' in run.stdout.splitlines()
+    assert not [l for l in run.stdout.splitlines() if l.startswith('    VLLM_ENGRAM_')]
+
+
+def test_status_shows_the_setting_and_the_last_start(tmp_path):
+    log = tmp_path / 'serve.log'
+    log.write_text('Engram tables: ram (auto: 300 GiB available, RAM placement needs ~212 GiB)\n' + SSD_100 + '\n')
+    body = ('read_cid() { :; }\nhealth_ok() { return 1; }\nkv_line() { :; }\ninstall_done() { return 0; }\n'
+            'models_present() { return 0; }\ndo_status\n')
+    run = run_start(tmp_path, body, SERVE_LOG=str(log))
+    assert run.returncode == 0, run.stderr
+    assert 'VLLM_ENGRAM_PLACEMENT=auto; last start: ssd (auto: 100 GiB available' in run.stdout
+
+
+def test_need_reaches_the_container_only_when_set(tmp_path):
+    run = run_start(tmp_path, 'container_env\n')
+    assert run.returncode == 0 and 'NEED_RAM_GIB' not in run.stdout
+    run = run_start(tmp_path, 'container_env\n', NEED_RAM_GIB='150')
+    assert 'NEED_RAM_GIB=150' in run.stdout.splitlines()
+
+
 def test_unknown_placement_and_layout_refuse(tmp_path):
-    assert run_start(tmp_path, ':\n', VLLM_ENGRAM_PLACEMENT='disk').returncode == 1
+    run = run_start(tmp_path, ':\n', VLLM_ENGRAM_PLACEMENT='disk')
+    assert run.returncode == 1 and 'must be auto, ram or ssd' in run.stderr
+    assert run_start(tmp_path, ':\n', NEED_RAM_GIB='lots').returncode == 1
     assert run_start(tmp_path, ':\n', LAYOUT='pp4').returncode == 1
 
 

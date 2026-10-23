@@ -137,6 +137,7 @@ def test_invalid_metrics(value):
 
 def test_start_owns_check_once_and_stops_on_failure(tmp_path):
     (tmp_path/'.env.example').write_text('')
+    (tmp_path/'engram_placement.sh').write_text((ROOT/'engram_placement.sh').read_text())
     source = (ROOT/'start.sh').read_text().rsplit('main "$@"', 1)[0]
     script = tmp_path/'start.sh'
     script.write_text(source + '''
@@ -173,6 +174,7 @@ def test_one_failed_liveness_query_does_not_stop_the_launch(tmp_path):
     # A single failed ownership check (docker returned nothing) while the
     # server loads is retried; two in a row mean the server is gone.
     (tmp_path/'.env.example').write_text('')
+    (tmp_path/'engram_placement.sh').write_text((ROOT/'engram_placement.sh').read_text())
     source = (ROOT/'start.sh').read_text().rsplit('main "$@"', 1)[0]
     queries = tmp_path/'queries'
     record = tmp_path/'stop'
@@ -283,6 +285,7 @@ def test_boot_log_ignores_previous_launch(tmp_path):
 
 def test_start_stops_log_failure_before_health(tmp_path):
     (tmp_path / '.env.example').write_text('')
+    (tmp_path / 'engram_placement.sh').write_text((ROOT / 'engram_placement.sh').read_text())
     log = tmp_path / 'serve.log'
     log.write_text('[p2p] P2P enabled: content check passed\n'
                    'Custom all-reduce flags-in-data path requested '

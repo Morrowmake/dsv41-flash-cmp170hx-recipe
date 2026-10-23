@@ -90,10 +90,12 @@ was validated with.
 ## One-time host setup
 
 - **4× NVIDIA CMP 170HX, each exposing 64 GiB**, on **PCIe Gen2 x16 links**
-- **About 240 GiB of host RAM**: the model's Engram lookup tables (~189 GiB)
-  are held in memory, and the server takes 202–204 GiB of host RAM in all.
-  With less, set `VLLM_ENGRAM_PLACEMENT=ssd` to read the tables from the SSD
-  instead; that is slower and wants the checkpoints on an SSD
+- **About 240 GiB of host RAM** for the fastest start: the model's Engram
+  lookup tables (~189 GiB) are held in memory, and the server takes 202–204 GiB
+  of host RAM in all. With less, the server reads the tables from the SSD
+  instead, on its own (`VLLM_ENGRAM_PLACEMENT=auto`); that is slower (with a
+  38 GiB cache per card, a cold 2K prompt's first token 6 % later, decode
+  within 1 %; less with a smaller cache) and wants the checkpoints on an SSD
   ([Host memory](docs/how-to-use.md#host-memory-and-the-engram-tables))
 - Linux with NVIDIA driver **580 or newer**
 - Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),

@@ -5,11 +5,11 @@
 | | |
 |---|---|
 | GPUs | 4× NVIDIA CMP 170HX, **each exposing 64 GiB** (`nvidia-smi` shows 65,536 MiB), on **PCIe Gen2 x16 links**. Stock cards expose less memory and run at x4; getting to 64 GiB and x16 is outside this repository. The preflight stops before any download if a card reports under 60 GiB, and warns below x16 ([Link width](#link-width)) |
-| Host memory | **about 240 GiB**: the Engram tables (~189 GiB) are held in host RAM, and the server takes 202–204 GiB of it in all. With less, read the tables from the SSD instead ([Host memory and the Engram tables](#host-memory-and-the-engram-tables)) |
+| Host memory | **about 240 GiB** for the fastest start: the Engram tables (~189 GiB) are held in host RAM, and the server takes 202–204 GiB of it in all. With less, the tables are read from the SSD instead, automatically and slower ([Host memory and the Engram tables](#host-memory-and-the-engram-tables)) |
 | OS and driver | Linux (the commands below are for Ubuntu) with NVIDIA driver **580 or newer**; `nvidia-smi` must list all four cards |
 | Container runtime | Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), usable by your user, so that `docker run --rm --gpus all nvidia/cuda:13.3.1-base-ubuntu24.04 nvidia-smi` lists all four cards. This and the driver are a one-time host setup; the engine and its Python environment come in the image |
 | Tools | for `./start.sh`: `git`, `curl`, `flock` and `setsid` (util-linux, on most systems already), Python 3 for the boot check, `jq` for the smoke test. Docker Compose needs only Docker |
-| Disk | about 680 GiB (730 GB) for the two checkpoints, plus the engine image and the kernel compile caches. An SSD if the Engram tables are read from disk |
+| Disk | about 680 GiB (730 GB) for the two checkpoints, plus the engine image and the kernel compile caches. An SSD (with its own DRAM) for `MODELS_DIR` when the Engram tables are read from disk |
 
 ## Step by step
 
@@ -27,7 +27,9 @@ done, so running it twice is safe. The same steps one at a time:
 The container runs the engine image, as your user rather than root, with the
 checkpoints mounted read-only and the kernel compile caches in `./cache`
 (owned by you). Its entry point, [`docker/entry.sh`](../docker/entry.sh) from
-this repository, checks peer access and then runs the release's launch, which
+this repository, decides where the Engram tables go
+([Host memory](#host-memory-and-the-engram-tables)), checks peer access and
+then runs the release's launch, which
 the image carries as `/opt/recipe/serve.sh`: the engine command and every
 serving default, generated from the settings this release was validated with.
 The API is published on `127.0.0.1:8000` only. Its output goes to
@@ -44,7 +46,8 @@ and `OFFICIAL_REVISION` (`1bae0e1088993b9b82de08f59de5be5a34e42170`), for
 **The first boot after an install or an update is slower.** The image ships
 no warm-cache seed (seed: {{SEED_YES_NO}}): it compiles on first boot (cold).
 The kernels go into `./cache`, and later boots reuse them. Loading the Engram
-tables into host memory also takes a while on every start. While a build runs,
+tables into host memory (or, read from the SSD, filling the row cache) also
+takes a while on every start. While a build runs,
 the log can show lines like
 `No available shared memory broadcast block found in 60 seconds`; they are
 harmless and stop once the build finishes.
@@ -121,7 +124,7 @@ In `.env.example`:
 | `API_KEY` | unset | bearer key required on `/v1`; unset means no key |
 | `SERVED_MODEL_NAME` | `dsv41-flash` | the model id clients send |
 | `MODELS_DIR` | `./models` | where the checkpoints go; see [Where models are stored](#where-models-are-stored) |
-| `VLLM_ENGRAM_PLACEMENT` | `ram` | the Engram tables in host RAM, or `ssd` to read them from the SSD ([Host memory](#host-memory-and-the-engram-tables)) |
+| `VLLM_ENGRAM_PLACEMENT` | `auto` | `ram` when the host has the memory, else `ssd`; or set `ram` (the Engram tables in host RAM) or `ssd` (read from the SSD, slower) ([Host memory](#host-memory-and-the-engram-tables)) |
 | `P2P` | `auto` | [content-verified peer access](#pcie-peer-to-peer); `off` disables, `force` bypasses the check |
 
 Commonly used from `.env.advanced.example`:
@@ -134,7 +137,7 @@ Commonly used from `.env.advanced.example`:
 | `IMAGE` | this release's image, by digest | the engine image (container) |
 | `CONTAINER_NAME` | `dsv41-flash` | the container's name |
 | `READY_TIMEOUT` | `3600` | seconds `./start.sh` waits for `/health` |
-| `NEED_RAM_GIB` | `212` | host memory the preflight asks for when the Engram tables are in RAM |
+| `NEED_RAM_GIB` | `212` | host memory the Engram tables in RAM need: below it `auto` picks `ssd` and an explicit `ram` stops |
 | `HF_TOKEN` | unset | a Hugging Face token makes the download faster |
 
 Every setting in both example files is commented out and shows its default;
@@ -165,26 +168,51 @@ it does not repeat the boot check.
 ## Host memory and the Engram tables
 
 DeepSeek-V4.1 looks up two Engram tables for every token: about 189 GiB, the
-last two shards of the official checkpoint. This release holds them in host
-RAM (`VLLM_ENGRAM_PLACEMENT=ram`), split across the four cards' processes, and
-the cards fetch their rows from there. With the tables in RAM the server takes
-202–204 GiB of host memory in all. Before the start, the preflight checks that
-the host has about 212 GiB available (`NEED_RAM_GIB`); the engine checks again,
-with the container's memory limits, before it allocates, and refuses with the
-shortfall rather than running out of memory.
+last two shards of the official checkpoint. Where they live is
+`VLLM_ENGRAM_PLACEMENT`:
 
-On a host with less memory, read the tables from the SSD instead:
+- **`auto`** (the default) decides at every start, in the container's entry
+  point, so `./start.sh` and Docker Compose decide alike. It takes the host
+  memory available to the server (`MemAvailable`, or less when the container
+  has a memory limit) and picks `ram` when that covers `NEED_RAM_GIB`
+  (212 GiB), `ssd` when it does not. One line in the log says what it chose
+  and why, for example
+  `Engram tables: ssd (auto: 150 GiB available, RAM placement needs ~212 GiB; slower), row cache 30 GiB per card, filled at start, direct reads`.
+  `./start.sh`'s preflight prints the same line before the start, and
+  `./start.sh status` shows the last start's.
+- **`ram`** holds the tables in host RAM, split across the four cards'
+  processes; the cards fetch their rows from there. The server then takes
+  202–204 GiB of host memory in all. This is how the published numbers were
+  measured. Set it explicitly and `./start.sh` stops before the start when
+  less than `NEED_RAM_GIB` is available; the engine checks again, with the
+  container's memory limits, before it allocates, and refuses with the
+  shortfall rather than running out of memory.
+- **`ssd`** reads the tables from the checkpoint files on disk, through a row
+  cache in host RAM per card. Keep `MODELS_DIR` on an SSD (an NVMe drive with
+  its own DRAM; a DRAM-less drive can stall for seconds to minutes under the
+  sustained random reads).
 
 ```bash
 VLLM_ENGRAM_PLACEMENT=ssd ./start.sh restart     # this run
 # or set VLLM_ENGRAM_PLACEMENT=ssd in .env (Docker Compose: in docker/container.env)
 ```
 
-The release keeps no row cache (`VLLM_ENGRAM_ROW_CACHE_GIB=0`), so every
-lookup is read from the SSD; `VLLM_ENGRAM_ROW_CACHE_GIB` gives the SSD
-placement a row cache in host RAM, in GiB per card (for example `4`). Every
-step waits on SSD reads, so it is slower, and the published numbers do not
-apply. Keep `MODELS_DIR` on an SSD then.
+Under `ssd`, by `auto` or set, the entry point also chooses the SSD path's
+settings, each unless you set it:
+
+| Key | Chosen | What it does |
+|---|---|---|
+| `VLLM_ENGRAM_ROW_CACHE_GIB` | (available − 29 GiB) / 4, between 1 and 48 GiB | each card's row cache in host RAM; 48 GiB holds a card's whole share of the tables. The server takes ~24 GiB besides the caches and 5 GiB stays free |
+| `VLLM_ENGRAM_ROW_CACHE_PRELOAD` | `1` for a cache of 12 GiB or more, else `0` | fills the cache at start with one sequential pass over the card's share (~49 GB read per card, whatever the cache size), so a smaller cache is not filled |
+| `VLLM_ENGRAM_DIRECT_READ` | `1` | reads the rows the cache misses past the page cache, so they take no extra host memory; a file system that refuses direct reads is refused at start: set it to `0` there |
+
+**What `ssd` costs.** Measured on our cards with a 38 GiB cache per card,
+filled at start, and direct reads, against `ram`: one-user decode within 1 %,
+the first token of a cold 2,048-token prompt 6 % later (772 against 725 ms),
+of a cold 32K prompt 1 % later. Filling the cache adds the read of the four
+cards' shares (~196 GB) to every start. A smaller cache (a host with less
+memory) sends more lookups to the drive and is slower; those sizes are not
+measured, and the published numbers are for `ram`.
 
 ## Where models are stored
 

@@ -8,9 +8,13 @@
 #   1. caches   a private temporary directory, the optional compilation-cache
 #               seed (VLLM_IMAGE_CACHE_SEED=1), and every compiler and download
 #               cache under the mounted /cache
-#   2. p2p      the peer-access content check (p2p_check.sh): peer transports
+#   2. engram   where the Engram tables live (engram_placement.sh): under
+#               VLLM_ENGRAM_PLACEMENT=auto, the default, host RAM when the
+#               memory this container can use covers NEED_RAM_GIB, else the
+#               SSD with a row cache sized from that memory
+#   3. p2p      the peer-access content check (p2p_check.sh): peer transports
 #               only after it passes; P2P=off or P2P=force skip it
-#   3. serve    serve.sh, under the two-request boot check (boot_check.py)
+#   4. serve    serve.sh, under the two-request boot check (boot_check.py)
 #               unless BOOT_CHECK=0 or start.sh runs that check itself
 #
 # DRY=1 checks nothing on the cards and lets serve.sh print the environment
@@ -75,12 +79,25 @@ if [ -n "${RECIPE_CACHE_ROOT:-}" ] && [ "${DRY:-0}" != 1 ]; then
     unset cache_path
 fi
 
-# 2. Peer access: every peer transport off unless the check passes
+# 2. The Engram tables: ram or ssd, decided once here and passed to serve.sh;
+# under ssd also the row cache size, its fill at start and direct reads,
+# unless they are set.
+source "$REPO_ROOT/engram_placement.sh"
+engram_placement || exit 2
+export VLLM_ENGRAM_PLACEMENT="$ENGRAM_PLACEMENT"
+if [ "$ENGRAM_PLACEMENT" = ssd ]; then
+    export VLLM_ENGRAM_ROW_CACHE_GIB="$ENGRAM_ROW_CACHE_GIB"
+    export VLLM_ENGRAM_ROW_CACHE_PRELOAD="$ENGRAM_PRELOAD"
+    export VLLM_ENGRAM_DIRECT_READ="$ENGRAM_DIRECT_READ"
+fi
+echo "$ENGRAM_LINE"
+
+# 3. Peer access: every peer transport off unless the check passes
 # (p2p_check.sh sets P2P_ENABLED and the transports).
 source "$REPO_ROOT/p2p_check.sh"
 echo "entry.sh: [p2p] enabled=${P2P_ENABLED:-0}"
 
-# 3. The server.
+# 4. The server.
 BOOT_CHECK="${BOOT_CHECK:-1}"
 case "$BOOT_CHECK" in 0|1) ;; *) echo "[boot-check] FAIL: BOOT_CHECK must be 0 or 1" >&2; exit 2 ;; esac
 if [ "${DRY:-0}" = 1 ]; then

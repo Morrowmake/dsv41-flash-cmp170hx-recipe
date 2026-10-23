@@ -417,8 +417,8 @@ def test_container_setup_creates_private_tmp_and_writable_caches(tmp_path, seede
         pytest.skip('Requires rootless namespace support')
     environment = dict(line.split('=', 1) for line in (ROOT / 'container.env').read_text().splitlines()
                        if line and not line.startswith('#'))
-    # docker/entry.sh up to the peer check: the private temporary directory and the caches.
-    prelude = (ROOT / 'entry.sh').read_text().split('\n# 2. Peer access', 1)[0]
+    # docker/entry.sh up to the Engram placement: the private temporary directory and the caches.
+    prelude = (ROOT / 'entry.sh').read_text().split('\n# 2. The Engram tables', 1)[0]
     # Seed integrity/identity is tested separately; apply its real exports on CPU.
     environment['VLLM_IMAGE_CACHE_SEED'] = '0'
     if seeded:
@@ -470,6 +470,7 @@ def test_container_environment_matches_start(tmp_path):
     source = (ROOT.parent / 'start.sh').read_text().rsplit('main "$@"', 1)[0]
     script = tmp_path / 'start.sh'
     (tmp_path / '.env.example').write_text('')
+    (tmp_path / 'engram_placement.sh').write_text((ROOT.parent / 'engram_placement.sh').read_text())
     script.write_text(source + '\ncontainer_env\n')
     run = subprocess.run(['bash', str(script)], capture_output=True, text=True,
                          env=dict(PATH=os.defpath, CUDA_VISIBLE_DEVICES='', HOME=str(tmp_path)))

@@ -22,7 +22,8 @@ measured.
 If the server fails at startup or a reply looks wrong, the useful order is:
 
 1. `P2P=off`: rules out peer-to-peer transfers ([PCIe peer-to-peer](how-to-use.md#pcie-peer-to-peer)).
-2. `VLLM_ENGRAM_PLACEMENT=ssd`: rules out host memory for the Engram tables
+2. `VLLM_ENGRAM_PLACEMENT=ssd` (or `ram`, when `auto` chose `ssd`): rules out
+   the other place for the Engram tables
    ([Host memory](how-to-use.md#host-memory-and-the-engram-tables)).
 3. Then the switches below one at a time, a family at a time when a switch
    needs another (the table says which). The engine refuses at startup a
@@ -83,8 +84,10 @@ Memory and placement:
 
 | Switch | Release | What it does |
 |---|---|---|
-| `VLLM_ENGRAM_PLACEMENT` | `ram` | the Engram tables in host RAM; `ssd` reads them from the checkpoint files |
-| `VLLM_ENGRAM_ROW_CACHE_GIB` | `0` | the host row cache for `ssd` placement, in GiB per card's share; set it (for example `4`) with `ssd` |
+| `VLLM_ENGRAM_PLACEMENT` | `auto`: `ram` with 212 GiB of host memory available | the Engram tables in host RAM; `ssd` reads them from the checkpoint files; `auto` (the recipe's entry point) picks one at each start |
+| `VLLM_ENGRAM_ROW_CACHE_GIB` | under `ssd`: from the host memory, 1–48 | the host row cache for `ssd` placement, in GiB per card; unused by `ram` |
+| `VLLM_ENGRAM_ROW_CACHE_PRELOAD` | under `ssd`: `1` for a cache of 12 GiB or more | fills the row cache at start with one sequential read of each card's share |
+| `VLLM_ENGRAM_DIRECT_READ` | under `ssd`: `1` | reads cache misses past the page cache; `0` on a file system that refuses direct reads |
 | `VLLM_EXL3_HYBRID` | `1` | the hybrid checkpoint: EXL3 routed experts, the official FP8 weights for the rest |
 | `VLLM_USE_BREAKABLE_CUDAGRAPH` | `1` | CUDA graphs that leave room for the Engram row staging |
 | `VLLM_CUDAGRAPH_ESTIMATE_SPLIT` | `1` | the CUDA graph memory estimate the KV pool is sized with |

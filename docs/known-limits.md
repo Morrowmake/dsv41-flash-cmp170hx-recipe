@@ -14,10 +14,11 @@
   elsewhere is untested.
 - **Wide links for tensor-parallel.** See [Link width](how-to-use.md#link-width).
 - **Host memory.** The Engram tables (~189 GiB) are held in host RAM, and the
-  server takes 202–204 GiB of it in all. With
-  `VLLM_ENGRAM_PLACEMENT=ssd` they are read from the SSD instead; that runs on
-  smaller hosts but is slower, and the published numbers were measured with
-  the tables in RAM ([Host memory](how-to-use.md#host-memory-and-the-engram-tables)).
+  server takes 202–204 GiB of it in all. On a host with less, they are read
+  from the SSD instead, automatically; that runs on smaller hosts but is
+  slower, more so the less memory there is for the row cache, and the
+  published numbers were measured with the tables in RAM
+  ([Host memory](how-to-use.md#host-memory-and-the-engram-tables)).
 - **Disk.** The served checkpoint is built from the full official FP8
   checkpoint (~475 GiB, which also holds the Engram tables) and the EXL3
   export (~196 GiB): about 680 GiB in all.

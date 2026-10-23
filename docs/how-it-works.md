@@ -20,9 +20,11 @@ against the bytes this release was validated with.
 
 The Engram tables (about 189 GiB, in the official checkpoint's last two
 shards) are not loaded onto the cards. Each card's process holds its share of
-the rows in host RAM and the cards fetch the rows a step needs; with
-`VLLM_ENGRAM_PLACEMENT=ssd` they are read from the checkpoint files instead.
-With the tables in RAM the server takes 202–204 GiB of host memory in all.
+the rows in host RAM and the cards fetch the rows a step needs. With the
+tables in RAM the server takes 202–204 GiB of host memory in all; on a host
+with less, the entry point reads them from the checkpoint files on the SSD
+instead, through a row cache in host RAM per card
+(`VLLM_ENGRAM_PLACEMENT=auto`, the default).
 
 ## What makes it fast, and correct
 
@@ -69,7 +71,7 @@ Every feature has a switch ([Engine switches](engine-switches.md)).
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, the deepseek_v41 tool-call and reasoning parsers |
 | Vision | images on; each card runs the vision tower on its own share of the images |
-| Engram tables | host RAM (`VLLM_ENGRAM_PLACEMENT=ram`) |
+| Engram tables | host RAM when 212 GiB is available, else read from the SSD (`VLLM_ENGRAM_PLACEMENT=auto`) |
 | Memory target | `--gpu-memory-utilization 0.95` |
 
 ## Comparing launch configuration

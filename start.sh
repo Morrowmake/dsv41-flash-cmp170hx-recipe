@@ -9,9 +9,9 @@
 # context, tensor-parallel 4 with whole routed experts per card. The weights
 # are a hybrid: the routed experts from the EXL3 2.9 bpw export, every other
 # weight from DeepSeek's official FP8 checkpoint. The Engram tables (~189 GiB;
-# the server takes 202-204 GiB of host RAM in all) are held in host RAM; on a
-# host with less memory they can be read from the SSD instead
-# (VLLM_ENGRAM_PLACEMENT=ssd, slower). No KV quantisation.
+# the server takes 202-204 GiB of host RAM in all) are held in host RAM when
+# the host has the memory, and read from the SSD when it has not
+# (VLLM_ENGRAM_PLACEMENT=auto, the default; slower). No KV quantisation.
 #
 # The engine runs in a container: Docker with the NVIDIA Container Toolkit,
 # image pinned by digest. docker-compose.yml runs the same container.
@@ -21,7 +21,7 @@
 #
 # What we do:
 #   1. preflight — docker, git, 4 GPUs of >=60 GiB (read only), link width,
-#                  host RAM, disk, port
+#                  disk, port, and where the Engram tables go (host RAM)
 #   2. install   — the pinned engine image, if missing or the pin moved
 #   3. download  — the two checkpoints, if missing or incomplete (resumed),
 #                  into models/ (or MODELS_DIR), then the hybrid checkpoint
@@ -172,10 +172,16 @@ LAYOUT="${LAYOUT:-tp4}"
 [ "$LAYOUT" = tp4 ] || die "LAYOUT must be tp4, not '$LAYOUT'"
 PP=1; TP=4
 export LAYOUT
-# The Engram tables: in host RAM (ram, the release default) or read from the
-# SSD the official checkpoint is on (ssd).
-ENGRAM_PLACEMENT="${VLLM_ENGRAM_PLACEMENT:-ram}"
-case "$ENGRAM_PLACEMENT" in ram|ssd) ;; *) die "VLLM_ENGRAM_PLACEMENT must be ram or ssd, not '$ENGRAM_PLACEMENT'" ;; esac
+# The Engram tables: in host RAM (ram) or read from the SSD the official
+# checkpoint is on (ssd); auto, the default, takes ram when the host has the
+# memory for it (NEED_RAM_GIB, default in engram_placement.sh) and ssd when it
+# has not. The container's entry decides with the same file; the preflight
+# reports that decision.
+. "$SCRIPT_DIR/engram_placement.sh"
+ENGRAM_SETTING="${VLLM_ENGRAM_PLACEMENT:-auto}"
+ENGRAM_PLACEMENT=''
+case "$ENGRAM_SETTING" in auto|ram|ssd) ;; *) die "VLLM_ENGRAM_PLACEMENT must be auto, ram or ssd, not '$ENGRAM_SETTING'" ;; esac
+case "${NEED_RAM_GIB:-0}" in *[!0-9]*) die "NEED_RAM_GIB must be a whole number of GiB, not '$NEED_RAM_GIB'" ;; esac
 CONTAINER_NAME="${CONTAINER_NAME:-dsv41-flash}"
 SHM_SIZE="${SHM_SIZE:-16g}"
 CACHE_DIR="${CACHE_DIR:-$SCRIPT_DIR/cache}"
@@ -187,10 +193,6 @@ STOP_TIMEOUT="${STOP_TIMEOUT:-120}"
 MIN_GPUS="${MIN_GPUS:-4}"
 MIN_GPU_MIB="${MIN_GPU_MIB:-61440}"      # 60 GiB; the cards we run report 65,536 MiB
 NEED_DISK_GB="${NEED_DISK_GB:-680}"      # GiB, as df -BG counts it: checkpoints ~672 GiB
-# Host memory free for the Engram tables in RAM: the server takes 202-204 GiB
-# of host RAM with them (~189 GiB of tables), plus the engine's 2 GiB margin
-# per card.
-NEED_RAM_GIB="${NEED_RAM_GIB:-212}"
 LOCK_WAIT="${LOCK_WAIT:-30}"
 
 LOGDIR="$SCRIPT_DIR/logs"
@@ -320,27 +322,37 @@ preflight() {
     fi
 }
 
-# Host memory for the Engram tables in RAM. Read only; the engine checks the
-# same again (with its container's limits) before it allocates. A running
-# server of ours already holds the tables, so it is not counted against them.
+# Where the Engram tables go, from the host memory available. Read only: the
+# container's entry makes the same decision again (engram_placement.sh) and
+# the engine checks before it allocates. Under auto a host without the memory
+# gets ssd; an explicit ram stops here instead. A running server of ours
+# already holds its tables, so nothing is decided against the memory it takes.
 preflight_ram() {
-    local avail_kb avail_gib
-    if [ "$ENGRAM_PLACEMENT" = ssd ]; then
-        log "  Engram tables: read from the SSD (VLLM_ENGRAM_PLACEMENT=ssd)"
-        return 0
-    fi
-    server_is_ours && { log "  host RAM: in use by our server"; return 0; }
-    avail_kb="$(awk '$1 == "MemAvailable:" {print $2}' /proc/meminfo 2>/dev/null || true)"
-    [ -n "$avail_kb" ] || { warn "  host RAM: cannot read /proc/meminfo — skipping the check"; return 0; }
-    avail_gib=$((avail_kb / 1048576))
-    if [ "$avail_gib" -lt "$NEED_RAM_GIB" ]; then
-        if [ -n "${DRY:-}" ]; then
-            warn "  host RAM: ${avail_gib} GiB available, the Engram tables need ~${NEED_RAM_GIB} GiB (not fatal under DRY)"
-            return 0
+    local need="${NEED_RAM_GIB:-$ENGRAM_NEED_RAM_GIB_DEFAULT}"
+    server_is_ours && { log "  Engram tables: in use by our server"; return 0; }
+    engram_placement || exit 1
+    if [ "$ENGRAM_SETTING" = ram ]; then
+        [ -n "$ENGRAM_AVAIL_GIB" ] || { warn "  host RAM: cannot read /proc/meminfo — skipping the check"; return 0; }
+        if [ "$ENGRAM_AVAIL_GIB" -lt "$need" ]; then
+            if [ -n "${DRY:-}" ]; then
+                warn "  host RAM: ${ENGRAM_AVAIL_GIB} GiB available, the Engram tables need ~${need} GiB (not fatal under DRY)"
+                return 0
+            fi
+            die "host RAM: ${ENGRAM_AVAIL_GIB} GiB available, but the Engram tables in RAM need ~${need} GiB. Free memory, or read them from the SSD instead: set VLLM_ENGRAM_PLACEMENT=ssd in .env (slower; keep MODELS_DIR on an SSD). Set NEED_RAM_GIB to override this check."
         fi
-        die "host RAM: ${avail_gib} GiB available, but the Engram tables in RAM need ~${NEED_RAM_GIB} GiB. Free memory, or read them from the SSD instead: set VLLM_ENGRAM_PLACEMENT=ssd in .env (slower; keep MODELS_DIR on an SSD). Set NEED_RAM_GIB to override this check."
     fi
-    log "  host RAM: ${avail_gib} GiB available (Engram tables in RAM need ~${NEED_RAM_GIB} GiB)"
+    log "  $ENGRAM_LINE"
+}
+
+# Where the Engram tables go, for the launch line: the preflight's decision.
+engram_where() {
+    if [ -z "$ENGRAM_PLACEMENT" ]; then
+        printf '%s' "$ENGRAM_SETTING"
+    elif [ "$ENGRAM_SETTING" = auto ]; then
+        printf '%s (auto)' "$ENGRAM_PLACEMENT"
+    else
+        printf '%s' "$ENGRAM_PLACEMENT"
+    fi
 }
 
 # Docker must be installed and usable by this user, with the NVIDIA Container
@@ -471,7 +483,7 @@ publish_addr() {
 # The environment of the container's entry (docker/entry.sh) and the image's
 # serve.sh: the in-container location, then every setting of yours they read.
 CONTAINER_KEYS="P2P P2P_PREBUILT P2P_CHECK_CACHE CUDA_VISIBLE_DEVICES MAX_SEQS MAX_BATCHED EXTRA_ARGS
-SERVED_MODEL_NAME API_KEY"
+SERVED_MODEL_NAME API_KEY NEED_RAM_GIB"
 
 container_env() {
     local k
@@ -523,13 +535,16 @@ container_args() {
         -v "$SCRIPT_DIR/p2p_check.py:/recipe/p2p_check.py:ro"
         -v "$SCRIPT_DIR/p2p_check.sh:/recipe/p2p_check.sh:ro"
         -v "$SCRIPT_DIR/p2p_probe.cu:/recipe/p2p_probe.cu:ro"
+        -v "$SCRIPT_DIR/engram_placement.sh:/recipe/engram_placement.sh:ro"
         "${mounts[@]}"
         -v "$CACHE_DIR:/cache"
         --entrypoint /bin/bash "$IMAGE" /recipe/entry.sh)
 }
 
 # The launch the image's serve.sh would run, under DRY: the image's own when it
-# is here, else this checkout's copy of it (the image is built from it).
+# is here, else this checkout's copy of it (the image is built from it). The
+# Engram placement it shows is the launch's default: the entry decides auto at
+# start, as the preflight line above says, and adds that decision.
 dry_serve() {
     local envfile="$1"
     if command -v docker >/dev/null 2>&1 && container_image_present; then
@@ -547,7 +562,7 @@ container_launch() {
         printf '  '; printf '%q ' "${CRUN[@]}"; printf '\n'
         log "  with this environment in the container:"
         container_env | sed -e 's/^\(API_KEY\)=.*/\1=(set, not shown)/' -e 's/^/    /'
-        log "  and the image's serve.sh would run:"
+        log "  and the image's serve.sh would run (the entry first sets the Engram placement: ${ENGRAM_PLACEMENT:-$ENGRAM_SETTING}):"
         local envfile="$LOGDIR/container.env.dry"
         mkdir -p "$LOGDIR"
         ( umask 077; container_env >"$envfile" )
@@ -582,7 +597,7 @@ container_launch() {
     fi
     mkdir -p "$LOGDIR" "$CACHE_DIR"
     [ -w "$CACHE_DIR" ] || die "$CACHE_DIR is not writable by $(id -un); the server runs as you and keeps its compile caches there. Fix its ownership or set CACHE_DIR."
-    log "launch: container, layout $LAYOUT (TP=$TP), Engram tables in $ENGRAM_PLACEMENT, $(publish_addr)"
+    log "launch: container, layout $LAYOUT (TP=$TP), Engram tables in $(engram_where), $(publish_addr)"
     log "  image: $IMAGE"
     log "  log: $SERVE_LOG"
     BOOT_LOG_OFFSET=0
@@ -716,7 +731,9 @@ do_stop() { container_stop; }
 
 # -------------------------------- status -----------------------------------
 do_status() {
-    log "layout $LAYOUT (TP=$TP), Engram tables in $ENGRAM_PLACEMENT"
+    local engram
+    engram="$(grep -a 'Engram tables: ' "$SERVE_LOG" 2>/dev/null | tail -n 1 || true)"
+    log "layout $LAYOUT (TP=$TP), VLLM_ENGRAM_PLACEMENT=$ENGRAM_SETTING${engram:+; last start: ${engram#*Engram tables: }}"
     local id st; id="$(read_cid)"
     if [ -z "$id" ]; then
         log "process: no container started from this checkout"

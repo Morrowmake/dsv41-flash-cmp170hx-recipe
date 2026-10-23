@@ -19,8 +19,8 @@ image, how to build it, and how to run it by hand with `docker run`.
 - **The release's launch:** `/opt/recipe/serve.sh`, generated from the
   settings this release was validated with: the engine command and every
   serving default, for the one layout (`LAYOUT=tp4`). The recipe runs it through
-  [`docker/entry.sh`](entry.sh), which checks peer access and runs the boot
-  check first. Settings you give at run time override its defaults.
+  [`docker/entry.sh`](entry.sh), which decides where the Engram tables go,
+  checks peer access and runs the boot check first. Settings you give at run time override its defaults.
 - **Base:** `nvidia/cuda:13.3.1-devel-ubuntu24.04`, pinned by digest. It is the
   devel image because Triton, TileLang, FlashInfer and the host-memory
   all-reduce compile kernels at run time and need `nvcc` and `g++`.
@@ -141,7 +141,8 @@ runtime before distributing any rebuilt image.
 
 You need:
 
-- the four cards, NVIDIA driver **580 or newer** and about 240 GiB of host RAM
+- the four cards, NVIDIA driver **580 or newer** and about 240 GiB of host RAM,
+  or less with the Engram tables read from the SSD, slower
   ([What you need](../docs/how-to-use.md#what-you-need));
 - Docker with the
   [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
@@ -167,6 +168,7 @@ docker run -d --name dsv41-flash --user "$(id -u):$(id -g)" --workdir /cache \
   -v "$PWD/p2p_check.py:/recipe/p2p_check.py:ro" \
   -v "$PWD/p2p_check.sh:/recipe/p2p_check.sh:ro" \
   -v "$PWD/p2p_probe.cu:/recipe/p2p_probe.cu:ro" \
+  -v "$PWD/engram_placement.sh:/recipe/engram_placement.sh:ro" \
   -v "$MODELS/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw:/models/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw:ro" \
   -v "$MODELS/DeepSeek-V4.1-Flash-1017:/models/DeepSeek-V4.1-Flash-1017-engram:ro" \
   -v "$MODELS/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8:/models/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8:ro" \
