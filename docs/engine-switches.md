@@ -91,12 +91,21 @@ Memory and placement:
 | `VLLM_EXL3_HYBRID` | `1` | the hybrid checkpoint: EXL3 routed experts, the official FP8 weights for the rest |
 | `VLLM_USE_BREAKABLE_CUDAGRAPH` | `1` | CUDA graphs that leave room for the Engram row staging |
 | `VLLM_CUDAGRAPH_ESTIMATE_SPLIT` | `1` | the CUDA graph memory estimate the KV pool is sized with |
+| `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` | `128` | the prefill indexer's score buffer, filled in more passes than at the default 512; the memory goes to the KV cache |
 | `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:False` | the allocator mode the custom all-reduce needs |
+
+Scheduling:
+
+| Setting | Release | What it does |
+|---|---|---|
+| `--prefill-chunk-with-decodes` | `512` | while other requests decode, a long prompt prefills in 512-token pieces, so running answers keep streaming |
+| `VLLM_FAIR_PREFILL_SHORT_BYPASS` | `1` | a prompt no longer than that piece is scheduled whole beside decoding requests, so a burst of short prompts starts in one step |
+| `--exclude-tools-when-tool-choice-none` | on | with `tool_choice: "none"` the tool definitions are left out of the prompt, so the model answers in text |
 
 ## What the release leaves off
 
-These exist in the engine and are off in this release; they were not part of
-the measured configuration: `VLLM_DEEPSEEK_V41_MOE_ROUND_ONCE_ALLREDUCE`,
+These exist in the engine and stay at their defaults, which are off; they were
+not part of the measured configuration: `VLLM_DEEPSEEK_V41_MOE_ROUND_ONCE_ALLREDUCE`,
 `VLLM_ROUND_ONCE_ALLREDUCE_GROUPED`, an expert placement
 (`VLLM_EXL3_EXPERT_PLACEMENT`), and the diagnostic switches `VLLM_DEV_AB_SWITCH`
-and `VLLM_SM80_CAPTURE_DIR`.
+and `VLLM_SM80_CAPTURE_DIR`. The launch does not set them.

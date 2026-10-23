@@ -50,6 +50,9 @@ instead, through a row cache in host RAM per card
   model's own.
 - **CUDA graphs** for decode steps up to 48 tokens wide, with room left for the
   Engram row staging.
+- **Fair prefill.** While answers are streaming, a long prompt prefills in
+  512-token pieces beside them; a short prompt is scheduled whole, so a burst
+  of short requests starts at once.
 - **Full-precision KV cache.** The KV cache is BF16; no 8-bit KV storage.
 
 Every feature has a switch ([Engine switches](engine-switches.md)).
