@@ -31,7 +31,7 @@
 # from .env; every other setting goes in docker/container.env. The API is
 # published on 127.0.0.1:8000 only and has no API key.
 
-x-image: &image ${IMAGE:-ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{IMAGE_DIGEST}}}
+x-image: &image ${IMAGE:-ghcr.io/morrowmake/vllm-cmp170hx@sha256:f67d9be47ffbd4a8b84c77fe76bdb3f842187d9b2786fff573e390ae5361bfb0}
 
 services:
   prepare:

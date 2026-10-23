@@ -38,6 +38,21 @@ def test_every_default_image_is_the_start_pin():
             assert found == image, path
 
 
+def compose_value(value, env):
+    """VALUE as Compose interpolates `${NAME:-default}`: the default ends at the first `}`, the rest is literal."""
+    match = re.fullmatch(r'\$\{(\w+):-([^}]*)\}(.*)', value)
+    return (env.get(match[1]) or match[2]) + match[3]
+
+
+def test_the_compose_image_is_one_digest_reference_with_or_without_image_set():
+    image = release_image()
+    assert re.fullmatch(r'ghcr\.io/morrowmake/vllm-cmp170hx@sha256:[0-9a-f]{64}', image), image
+    value = re.search(r'^x-image: &image (.+)$', (ROOT / 'docker-compose.yml').read_text(), re.M)[1]
+    assert compose_value(value, {}) == image
+    local = 'sha256:' + '0' * 64
+    assert compose_value(value, {'IMAGE': local}) == local
+
+
 def test_compose_runs_the_start_container_after_prepare():
     yaml = pytest.importorskip('yaml')
     spec = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())

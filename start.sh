@@ -144,7 +144,7 @@ load_env_defaults "$SCRIPT_DIR/.env"
 # everywhere at once). The commit pin is read by the release tools, not here.
 # shellcheck disable=SC2034
 RELEASE_VLLM_COMMIT={{PIN}}
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{IMAGE_DIGEST}}
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:f67d9be47ffbd4a8b84c77fe76bdb3f842187d9b2786fff573e390ae5361bfb0
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 # Where the checkpoints are: MODELS_DIR (a relative path is taken from this
 # checkout), models/ here by default. Each checkpoint is a plain directory in

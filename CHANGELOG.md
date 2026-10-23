@@ -5,7 +5,7 @@
 First release: DeepSeek-V4.1-Flash-1017 on four CMP 170HX cards.
 
 - Engine: Morrowmake/vllm-cmp170hx at `{{PIN}}`, on upstream vLLM
-  `4e0681ed56`; image `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{IMAGE_DIGEST}}`
+  `4e0681ed56`; image `ghcr.io/morrowmake/vllm-cmp170hx@sha256:f67d9be47ffbd4a8b84c77fe76bdb3f842187d9b2786fff573e390ae5361bfb0`
   (seed: {{SEED_YES_NO}}).
 - **Model.** A hybrid checkpoint built on your machine as links into two
   downloads: the routed experts from
