@@ -58,6 +58,13 @@ builders pack them by hash; neither compiles them.
 the `Dockerfile`) pins the validated `manifest.json`; a different build, commit
 or toolchain fails the image build.
 
+This release's manifest also lists `vllm/_C_stable_libtorch`: the fork changes
+the Marlin kernel (`csrc/quantization/marlin/marlin.cu`), which upstream compiles
+into that library, so the image ships it rebuilt from the fork in the same pinned
+base image instead of the precompiled wheel's copy. `docker/native_build.py
+build` does not compile that library yet; the release image carries the
+validated files, checked by the pinned hash.
+
 **The launch** comes from `SERVE_SH` (rootless builder) or the `SERVE_SH` build
 argument (Docker), this repository's `serve.sh` by default. It is generated from
 the release settings, never written by hand; the builders refuse an empty file

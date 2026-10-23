@@ -20,6 +20,11 @@ release pins the resulting manifest's sha256 in `build.sh`
 (`RELEASE_NATIVE_MANIFEST_SHA256`) and the `Dockerfile` (`NATIVE_MANIFEST_SHA256`).
 `build.sh` packs them from `NATIVE_DIR` and finishes with `native_build.py
 check-oci` against the assembled image.
+This release's manifest also lists `vllm/_C_stable_libtorch`, rebuilt from the
+fork because the fork changes the Marlin kernel that upstream compiles into it;
+the image never runs the precompiled wheel's copy. `native_build.py build` does
+not compile that library yet, so the release packs the validated files by their
+pinned hash rather than rebuilding them.
 Native libraries reuse a layer only when their bytes are identical; a Python
 release never reuses native bytes solely on the basis of a branch name.
 `layers.json` records every compressed size and digest. `IMAGE_LAYERED=1` and

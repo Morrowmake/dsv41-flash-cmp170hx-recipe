@@ -30,7 +30,7 @@ VLLM_WHEEL_COMMIT="4e0681ed5654c1d8afb3c104d4381afd08529de8"
 # Upstream release tag the pin's base descends from (sets the version string).
 VERSION_TAG="v0.32.0rc0"
 # sha256 of the validated native_build.py manifest.json for RELEASE_VLLM_COMMIT.
-RELEASE_NATIVE_MANIFEST_SHA256='ac66efa4c0debe9093c1a6516e6762b83112c7c4dc691d719f4232d5414ecc16'
+RELEASE_NATIVE_MANIFEST_SHA256='aa940260d8787ab9d596892693d730ccf6e82855dd2f17a7116c04a31e1c2717'
 NATIVE_MANIFEST_SHA256="${NATIVE_MANIFEST_SHA256:-$RELEASE_NATIVE_MANIFEST_SHA256}"
 SERVE_SH="${SERVE_SH:-$HERE/../serve.sh}"
 UPSTREAM_REPO="https://github.com/vllm-project/vllm.git"

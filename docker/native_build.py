@@ -14,6 +14,14 @@ csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py) and, on commits that
 have csrc/exl3, vllm._exl3_C: csrc/exl3/build_standalone.py where the commit has it,
 else the fork's CMake target (module.cpp only). Flags stay the fork's.
 
+When the fork changes an upstream source that compiles into upstream's own
+vllm._C_stable_libtorch (this release: the Marlin kernel,
+csrc/quantization/marlin/marlin.cu), the release's manifest also lists that
+library, rebuilt from the fork's CMake target in the same pinned base image, so
+the image never runs the precompiled wheel's copy. `build` here does not compile
+that target yet, so it cannot reproduce such a manifest: the release ships the
+validated files, which `pack` and `check-oci` check by the pinned hash.
+
 Reproducibility: the build runs in a private mount namespace with one fixed
 layout (/opt/python, /opt/venv, /opt/vllm-src, /tmp/native-build), the CUDA
 13.3.1 devel base image as its root (nvcc and g++ by image digest), the source
