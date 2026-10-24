@@ -161,3 +161,19 @@ def test_effective_needs_a_release_pin(recipe):
     (recipe / "start.sh").write_text("RELEASE_VLLM_COMMIT=" + "{{" + "PIN" + "}}\n")
     with pytest.raises(ValueError, match="no release pin"):
         E.check_effective(recipe, write_leg(recipe), "tp4", recipe)
+
+
+def test_effective_image_tree_recipe_keys_and_engine_default_args(capsys):
+    """The image's engine-tree file equals the leg's same file (tree from its PYTHONPATH); a recipe-only key
+    with no serving behaviour and an argument at vLLM's default are allowed; anything else still fails."""
+    policy = "/vllm/models/deepseek_v41/nvidia/dspark_depth_policy.json"
+    leg = {"PYTHONPATH": "/srv/lab/tree", "VLLM_DSPARK_ADAPTIVE_DEPTH": "/srv/lab/tree" + policy}
+    mine = {"VLLM_DSPARK_ADAPTIVE_DEPTH": E.IMAGE_TREE + policy, "PYTHONDONTWRITEBYTECODE": "1"}
+    assert E.compare_environment(mine, leg, {}, PIN) == []
+    out = capsys.readouterr().out
+    assert "the same engine-tree file" in out and "allowed PYTHONDONTWRITEBYTECODE" in out
+    other = dict(mine, VLLM_DSPARK_ADAPTIVE_DEPTH=E.IMAGE_TREE + "/other.json")
+    assert len(E.compare_environment(other, leg, {}, PIN)) == 1
+    assert len(E.compare_environment(mine, dict(leg, PYTHONDONTWRITEBYTECODE="0"), {}, PIN)) == 1
+    assert E.compare_commands({"pipeline_parallel_size": 1}, {}) == []
+    assert len(E.compare_commands({"pipeline_parallel_size": 2}, {})) == 1

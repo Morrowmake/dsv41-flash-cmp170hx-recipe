@@ -54,6 +54,16 @@ IGNORED_ARGS = {"model", "model_tag", "host", "port", "enable_prompt_tokens_deta
 PATH_OVERRIDES = {"engram_table_dir"}
 # Arguments vLLM logs as the whole resolved config: compared on the keys the launch sets.
 RESOLVED_CONFIGS = {"compilation_config"}
+# Arguments the launch passes at vLLM's own default, so vLLM leaves them out of
+# its non-default args record; a validation leg that omits them ran the same.
+ENGINE_DEFAULT_ARGS = {"pipeline_parallel_size": 1}
+# Set by the recipe's launch only, with no serving behaviour.
+RECIPE_KEYS = {
+    "PYTHONDONTWRITEBYTECODE": "the container writes no bytecode into its read-only engine tree",
+}
+# Where the image holds the engine tree; a validation leg runs it from its own
+# checkout, named by its PYTHONPATH.
+IMAGE_TREE = "/opt/vllm-src"
 
 
 def release_pin(root=ROOT):
@@ -195,6 +205,9 @@ def compare_commands(actual, expected):
             else:
                 print(f"command: MATCH {key} on the keys the launch sets: {', '.join(sorted(mine))}")
             continue
+        if key not in expected and key in ENGINE_DEFAULT_ARGS and mine == ENGINE_DEFAULT_ARGS[key]:
+            print(f"command: allowed {key}={mine!r} (vLLM's default, which its non-default args record omits)")
+            continue
         if key not in actual or key not in expected or mine != theirs:
             failures.append(f"command: {key}: validation={theirs!r}, recipe={mine!r}")
         else:
@@ -214,6 +227,10 @@ def compare_environment(actual, expected, getters, pin):
             reason = "installation, checkpoint, cache or executable search path"
         elif key.startswith(IMAGE_PREFIXES):
             reason = "base-image metadata"
+        elif key in RECIPE_KEYS and key not in expected:
+            reason = RECIPE_KEYS[key]
+        elif key in actual and key in expected and same_tree_file(actual[key], expected[key], expected):
+            reason = f"the same engine-tree file, {actual[key].removeprefix(IMAGE_TREE + '/')}"
         # A name on one side only can be equivalent only through the pinned fork getter.
         if reason is None and ((key in actual) != (key in expected)) and key in getters:
             value = actual[key] if key in actual else expected[key]
@@ -230,6 +247,14 @@ def compare_environment(actual, expected, getters, pin):
             failures.append(f"environment: {key}: validation={expected.get(key)!r}, recipe={actual.get(key)!r}")
     print(f"environment: {matched} matches; {allowed} allowed differences; {len(failures)} mismatches")
     return failures
+
+
+def same_tree_file(mine, theirs, expected):
+    """The image tree's file and the same file in the validation leg's tree (its PYTHONPATH)."""
+    tree = expected.get("PYTHONPATH", "").rstrip("/")
+    if not tree.startswith("/") or ":" in tree or not mine.startswith(IMAGE_TREE + "/"):
+        return False
+    return theirs.startswith(tree + "/") and mine[len(IMAGE_TREE):] == theirs[len(tree):]
 
 
 def check_effective(root, path, layout, fork, serve_log=None, serve=None):
