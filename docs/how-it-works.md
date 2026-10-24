@@ -70,7 +70,7 @@ Every feature has a switch ([Engine switches](engine-switches.md)).
 | Layout | tensor-parallel 4 with expert parallelism; assumes PCIe Gen2 x16 |
 | Context | 262,144 tokens |
 | Concurrency | up to 8 requests; the scheduler's budget is 2,048 tokens per step |
-| KV cache | BF16, **not quantised**: {{KV_TOKENS}} tokens at 262,144 context with verified peer-to-peer |
+| KV cache | BF16, **not quantised**: 1,247,406 tokens at 262,144 context with verified peer-to-peer |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, the deepseek_v41 tool-call and reasoning parsers |
 | Vision | images on; each card runs the vision tower on its own share of the images |

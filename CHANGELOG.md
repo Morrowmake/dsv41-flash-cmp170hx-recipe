@@ -41,6 +41,8 @@ First release: DeepSeek-V4.1-Flash-1017 on four CMP 170HX cards.
   `docker/entry.sh` places the Engram tables, checks peer access and runs the
   boot check before it.
   Settings in `.env` override the defaults.
-- Measured on the release image: {{C1_TOK_S}} tok/s for one user,
-  {{C8_TOK_S}} tok/s across eight, {{PREFILL_TOK_S}} tok/s cold prefill, a
-  1,247,406-token KV pool ([Results](docs/results.md)).
+- Measured on the release image (tokens per second over each run, time to the
+  first token included): one user 319 structured, 287 code, 162 prose; eight
+  users together 765, 729 and 432; cold prefill 3,818 (2K prompt) and 3,808
+  (32K); a 1,247,406-token KV pool. HumanEval 157/164 and GSM8K 1,280/1,319,
+  level with the reference ([Results](docs/results.md)).

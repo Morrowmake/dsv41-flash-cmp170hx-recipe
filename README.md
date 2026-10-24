@@ -13,8 +13,9 @@
 </p>
 
 **DeepSeek-V4.1-Flash with a 262,144-token context, served on four CMP 170HX
-cards: {{C1_TOK_S}} tok/s for one user and {{C8_TOK_S}} tok/s across eight,
-{{PREFILL_TOK_S}} tok/s cold prefill and a 1,247,406-token KV pool. The routed
+cards: 319 tok/s for one user on structured output (287 on code, 162 on prose)
+and up to 765 tok/s across eight, 3,808 tok/s cold prefill of a 32K prompt and a
+1,247,406-token KV pool. The routed
 experts are EXL3 at 2.9 bits per weight; every other weight is DeepSeek's own
 FP8 or BF16, unchanged, and the KV cache is full precision.**
 
@@ -112,27 +113,28 @@ was validated with.
 
 ## Headline numbers
 
-Measured {{RESULTS_DATE}} on 4× CMP 170HX, 74 SMs per card, mainline
+Measured 2026-10-24 on 4× CMP 170HX, 74 SMs per card, mainline
 cmpunlocker with P2P, recipe defaults, 262,144-token context, 180 W per card
 and PCIe x16 links, by this release's own release check. Decode uses the
 MiaAI-Lab protocol: 400 tokens, temperature 0, requests sent with thinking off;
-one user is the median of five runs, and two, four and eight users the median
-aggregate rate of three runs, all on one boot.
+structured and code from its first prompt set, prose from its second, each set
+on its own boot. Every figure is the median of five runs, each run's completion
+tokens over its whole duration, time to the first token included.
 
 | | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer) (default after verification) |
 |---|---:|
-| **1 user** · structured | **{{C1_STRUCTURED}}** |
-| **1 user** · code | **{{C1_CODE}}** |
-| **1 user** · prose | **{{C1_PROSE}}** |
-| **8 users, total** · structured | {{C8_STRUCTURED}} |
-| **8 users, total** · code | {{C8_CODE}} |
-| **8 users, total** · prose | {{C8_PROSE}} |
-| **Prompt reading** (cold prefill, 2K tokens) | {{PREFILL_2K_TOK_S}} |
-| **Prompt reading** (cold prefill, 32K tokens) | {{PREFILL_32K_TOK_S}} |
+| **1 user** · structured | **319** |
+| **1 user** · code | **287** |
+| **1 user** · prose | **162** |
+| **8 users, total** · structured | 765 |
+| **8 users, total** · code | 729 |
+| **8 users, total** · prose | 432 |
+| **Prompt reading** (cold prefill, 2K tokens) | 3,818 |
+| **Prompt reading** (cold prefill, 32K tokens) | 3,808 |
 | **KV pool** (tokens) | 1,247,406 |
 
-One user is streaming speed per request; eight users is the combined rate of
-eight simultaneous requests. Structured output and code are drafted well, so
+One user is the rate of a single request; eight users is the combined rate of
+eight simultaneous requests, both in tokens per second. Structured output and code are drafted well, so
 they decode fastest; prose least. DSpark drafts up to 7 tokens ahead for one
 user and 5 for more; from three users on, each step verifies only as many
 drafts as each request's recent acceptance makes worthwhile. Method, quality

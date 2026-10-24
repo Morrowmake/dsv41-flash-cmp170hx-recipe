@@ -2,7 +2,7 @@
 
 ## Release 1.0.0
 
-Measured {{RESULTS_DATE}} on 4× CMP 170HX by this release's own release check:
+Measured 2026-10-24 on 4× CMP 170HX by this release's own release check:
 the engine `a0c57b52376efd67c57735bc949d4bafa22ae29e`, on upstream vLLM `4e0681ed56`, the image this release
 pins, and the release defaults, on 74 SMs per card, mainline
 cmpunlocker plus the minimal P2P patch, verified P2P, PCIe x16 links,
@@ -13,21 +13,25 @@ reported for reference; the published numbers are the defaults above.
 ## Throughput
 
 Decode uses the MiaAI-Lab protocol: 400 tokens, temperature 0, requests sent
-with thinking off; one user is the median of five runs, and two, four and eight
-users the median aggregate rate of three runs, all on one boot. Prompt reading
-is a cold 2,048- and 32,768-token prefill.
+with thinking off; structured and code from its first prompt set, prose from
+its second, each set on its own boot. Every figure is the median of five runs:
+a run's completion tokens over its whole duration, from the first request sent
+to the last answer finished, so the time to the first token is included (for
+two to eight users, the rate of all requests together). Prompt reading is a
+cold 2,048- and 32,768-token prefill: prompt tokens over the time to the first
+token, the median of two requests.
 
 | Users | Structured | Code | Prose |
 |---|---:|---:|---:|
-| 1 | {{C1_STRUCTURED}} | {{C1_CODE}} | {{C1_PROSE}} |
-| 2, total | {{C2_STRUCTURED}} | {{C2_CODE}} | {{C2_PROSE}} |
-| 4, total | {{C4_STRUCTURED}} | {{C4_CODE}} | {{C4_PROSE}} |
-| 8, total | {{C8_STRUCTURED}} | {{C8_CODE}} | {{C8_PROSE}} |
+| 1 | 319 | 287 | 162 |
+| 2, total | 360 | 431 | 230 |
+| 4, total | 545 | 602 | 324 |
+| 8, total | 765 | 729 | 432 |
 
 | | |
 |---|---:|
-| Prompt reading (cold prefill, 2,048 tokens), tok/s | {{PREFILL_2K_TOK_S}} |
-| Prompt reading (cold prefill, 32,768 tokens), tok/s | {{PREFILL_32K_TOK_S}} |
+| Prompt reading (cold prefill, 2,048 tokens), tok/s | 3,818 |
+| Prompt reading (cold prefill, 32,768 tokens), tok/s | 3,808 |
 | KV pool, tokens | 1,247,406 |
 
 ## Quality
@@ -39,10 +43,12 @@ speed switch off and the prefill budget at the engine default.
 
 | | Release | Reference |
 |---|---:|---:|
-| HumanEval | {{HUMANEVAL}} | {{HUMANEVAL_REF}} |
-| GSM8K | {{GSM8K}} | {{GSM8K_REF}} |
+| HumanEval | 157 / 164 | 157 / 164 |
+| GSM8K | 1,280 / 1,319 | 1,279 / 1,319 |
 
-{{QUALITY_VERDICT}}
+The release and the reference agree within the test's noise on both: HumanEval
+differs on no problem, GSM8K on 15 (8 more right, 7 fewer; McNemar exact
+two-sided p = 1).
 
 ## Repeatability
 
@@ -56,5 +62,7 @@ Each measured on one boot of the release image, prose prompts, same protocol:
 
 | | 1 user | 8 users, total | Cold prefill 2,048 tokens, tok/s |
 |---|---:|---:|---:|
-| Engram tables from the SSD (`VLLM_ENGRAM_PLACEMENT=ssd`), {{SSD_CACHE_GIB}} GiB row cache per card | {{SSD_C1}} | {{SSD_C8}} | {{SSD_PREFILL_2K}} |
-| Without peer-to-peer (`P2P=off`) | {{P2POFF_C1}} | {{P2POFF_C8}} | {{P2POFF_PREFILL_2K}} |
+| Engram tables from the SSD (`VLLM_ENGRAM_PLACEMENT=ssd`), 48 GiB row cache per card | 151 | 428 | 3,607 |
+| Without peer-to-peer (`P2P=off`) | 133 | 344 | 3,804 |
+
+Without peer-to-peer, two and four users reach 192 and 271 tok/s.
