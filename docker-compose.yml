@@ -64,6 +64,11 @@ services:
     working_dir: /cache
     entrypoint: ["/bin/bash", "/recipe/prepare.sh", "serve"]
     shm_size: 16g
+    # Swap included, the same limit: the server never swaps (swapped-out
+    # Engram tables cost ~8 % of prefill speed). The default is above any
+    # host's memory, so it limits nothing else; MEM_LIMIT in .env overrides.
+    mem_limit: ${MEM_LIMIT:-1024g}
+    memswap_limit: ${MEM_LIMIT:-1024g}
     stop_grace_period: 120s
     # Back after a crash (a non-zero exit), up to 3 times; never after
     # docker compose stop/down.

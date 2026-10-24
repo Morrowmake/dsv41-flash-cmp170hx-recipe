@@ -63,8 +63,10 @@ def check_log(path, container=False, offset=0):
 
 
 class Client:
-    def __init__(self, base, model, key=''):
+    def __init__(self, base, model, key='', drafting=True):
         self.base, self.model, self.key = base.rstrip('/'), model, key
+        # Without speculative decoding the server has no draft counters to check.
+        self.drafting = drafting
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.ready_deadline = None
         self.ready_guard = None
@@ -110,7 +112,8 @@ class Client:
 
     def metrics(self):
         with self.open('/metrics', timeout=5) as response:
-            return parse_metrics(response.read().decode(), self.model)
+            return parse_metrics(response.read().decode(), self.model,
+                                 TRACKED if self.drafting else (SUCCESS,))
 
     def request(self, prompt, **kwargs):
         return self.open('/v1/chat/completions', dict(
@@ -118,11 +121,11 @@ class Client:
             temperature=0, reasoning_effort='low', **kwargs))
 
 
-def parse_metrics(text, model):
+def parse_metrics(text, model, tracked=TRACKED):
     result = {}
     for line in text.splitlines():
         match = re.fullmatch(r'([^\s{]+)(\{.*\})?\s+([^\s]+)(?:\s+\d+)?', line)
-        if not match or match[1] not in TRACKED:
+        if not match or match[1] not in tracked:
             continue
         labels = match[2] or ''
         label = re.search(r'(?:\{|,)model_name=("(?:\\.|[^"\\])*")', labels)
@@ -132,7 +135,7 @@ def parse_metrics(text, model):
         if not math.isfinite(value) or value < 0:
             raise CheckError('invalid spec-decode counter')
         result[(match[1], labels)] = value
-    if {key[0] for key in result} != set(TRACKED):
+    if {key[0] for key in result} != set(tracked):
         raise CheckError('missing spec-decode counters for served model')
     return result
 
@@ -185,6 +188,11 @@ def check(client, metrics_wait=60, log_check=None):
                 chunks += 1
     if not done or not chunks:
         raise CheckError('generation stream was empty or incomplete')
+    if not client.drafting:
+        if log_check:
+            log_check()
+        banner('PASS: OK; speculative decoding off, draft counters not checked')
+        return
     deadline = time.monotonic() + metrics_wait
     while True:
         drafts, proposed, accepted = deltas(before, client.metrics())
@@ -265,6 +273,8 @@ def main():
     parser.add_argument('--ready-timeout', type=int, default=1800)
     parser.add_argument('--wait-ready', action='store_true')
     parser.add_argument('--serve', nargs=argparse.REMAINDER)
+    parser.add_argument('--no-draft', action='store_true',
+                        help='the server runs without speculative decoding: skip the draft-counter checks')
     args = parser.parse_args()
     if args.log_only and args.log is None:
         parser.error('--log-only requires --log')
@@ -275,7 +285,8 @@ def main():
         if args.log_only:
             log_check()
             return 0
-        client = Client(args.base, args.model, os.getenv('API_KEY', os.getenv('VLLM_API_KEY', '')))
+        client = Client(args.base, args.model, os.getenv('API_KEY', os.getenv('VLLM_API_KEY', '')),
+                        drafting=not args.no_draft)
         if args.serve:
             return supervise(client, args.serve, args.ready_timeout, args.container)
         if args.wait_ready:

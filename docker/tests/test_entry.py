@@ -14,6 +14,7 @@ printf 'RESULT:%s,%s,%s DRY=%s LAYOUT=%s\\n' "${VLLM_CUSTOM_ALLREDUCE_PCIE_P2P-u
   "${NCCL_P2P_LEVEL-unset}" "${NCCL_P2P_DISABLE-unset}" "${DRY-unset}" "${LAYOUT-unset}"
 printf 'ENGRAM:%s,%s,%s,%s\\n' "${VLLM_ENGRAM_PLACEMENT-unset}" "${VLLM_ENGRAM_ROW_CACHE_GIB-unset}" \\
   "${VLLM_ENGRAM_ROW_CACHE_PRELOAD-unset}" "${VLLM_ENGRAM_DIRECT_READ-unset}"
+printf 'DEPTH:%s\\n' "${VLLM_DSPARK_ADAPTIVE_DEPTH-unset}"
 '''
 ENGRAM_KEYS = ("VLLM_ENGRAM_PLACEMENT", "VLLM_ENGRAM_ROW_CACHE_GIB", "VLLM_ENGRAM_ROW_CACHE_PRELOAD",
                "VLLM_ENGRAM_DIRECT_READ", "NEED_RAM_GIB")
@@ -102,6 +103,25 @@ def test_boot_check_wraps_the_server_unless_start_owns_it(stage):
     run, calls = entry(stage, DRY="0", BOOT_CHECK="1", P2P="off", RECIPE_BOOT_CHECK_OWNER="start")
     assert run.returncode == 0 and started(calls) == ["serve"]
     assert "[boot-check] delegated to start.sh after health" in run.stdout
+
+
+@pytest.mark.parametrize("extra,off", [
+    ("--speculative-config None", True), ("--max-model-len 8192 --speculative-config=null", True),
+    ("--speculative-config off", True), ("--max-model-len 8192", False),
+    ('--speculative-config {"method":"dspark"}', False), ("", False)])
+def test_drafting_off_clears_the_adaptive_depth_and_the_draft_counters(stage, extra, off):
+    """Turning speculative decoding off in EXTRA_ARGS clears the adaptive depth (it needs the drafter's state
+    at graph capture) and runs the boot check without its draft counters; one line says so."""
+    run, calls = entry(stage, DRY="1", P2P="off", EXTRA_ARGS=extra, VLLM_DSPARK_ADAPTIVE_DEPTH="/policy.json")
+    assert run.returncode == 0, run.stderr
+    assert ("DEPTH:\n" if off else "DEPTH:/policy.json\n") in run.stdout
+    assert ("Speculative decoding: off (EXTRA_ARGS)" in run.stdout) is off
+    run, calls = entry(stage, DRY="0", BOOT_CHECK="1", P2P="off", EXTRA_ARGS=extra)
+    assert run.returncode == 0, run.stderr
+    boot = started(calls)[0]
+    assert boot.startswith("boot:") and ("--no-draft" in boot) is off
+    if off:
+        assert boot.index("--no-draft") < boot.index("--serve")
 
 
 def test_missing_launch_and_bad_settings_refuse(stage):

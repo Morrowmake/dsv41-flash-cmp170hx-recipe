@@ -5,16 +5,16 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/{{PIN}}"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20{{PIN}}-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/a0c57b52376efd67c57735bc949d4bafa22ae29e"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20a0c57b52376efd67c57735bc949d4bafa22ae29e-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-{{VERSION}}-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.0.0-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
 
 **DeepSeek-V4.1-Flash with a 262,144-token context, served on four CMP 170HX
 cards: {{C1_TOK_S}} tok/s for one user and {{C8_TOK_S}} tok/s across eight,
-{{PREFILL_TOK_S}} tok/s cold prefill and a {{KV_TOKENS}}-token KV pool. The routed
+{{PREFILL_TOK_S}} tok/s cold prefill and a 1,247,406-token KV pool. The routed
 experts are EXL3 at 2.9 bits per weight; every other weight is DeepSeek's own
 FP8 or BF16, unchanged, and the KV cache is full precision.**
 
@@ -112,7 +112,7 @@ was validated with.
 
 ## Headline numbers
 
-Measured {{RESULTS_DATE}} on 4× CMP 170HX, {{SM_COUNT}} SMs per card, mainline
+Measured {{RESULTS_DATE}} on 4× CMP 170HX, 74 SMs per card, mainline
 cmpunlocker with P2P, recipe defaults, 262,144-token context, 180 W per card
 and PCIe x16 links, by this release's own release check. Decode uses the
 MiaAI-Lab protocol: 400 tokens, temperature 0, requests sent with thinking off;
@@ -127,8 +127,9 @@ aggregate rate of three runs, all on one boot.
 | **8 users, total** · structured | {{C8_STRUCTURED}} |
 | **8 users, total** · code | {{C8_CODE}} |
 | **8 users, total** · prose | {{C8_PROSE}} |
-| **Prompt reading** (cold prefill) | {{PREFILL_TOK_S}} |
-| **KV pool** (tokens) | {{KV_TOKENS}} |
+| **Prompt reading** (cold prefill, 2K tokens) | {{PREFILL_2K_TOK_S}} |
+| **Prompt reading** (cold prefill, 32K tokens) | {{PREFILL_32K_TOK_S}} |
+| **KV pool** (tokens) | 1,247,406 |
 
 One user is streaming speed per request; eight users is the combined rate of
 eight simultaneous requests. Structured output and code are drafted well, so
@@ -142,7 +143,8 @@ and exact figures: [Results](docs/results.md).
 Settings live in `.env`; see [Settings](docs/how-to-use.md#settings).
 Every serving default (context, concurrency, speculative decoding, engine
 switches) is part of the release's launch, which the image carries; `.env`
-only overrides.
+only overrides. The server runs with swap disabled (`MEM_LIMIT`): swapping
+the Engram tables costs ~8 % of prefill speed.
 
 ## Documentation
 
@@ -172,7 +174,7 @@ only overrides.
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/{{PIN}}/LICENSE).
+**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/a0c57b52376efd67c57735bc949d4bafa22ae29e/LICENSE).
 
 The downloaded models have separate licences, both MIT:
 

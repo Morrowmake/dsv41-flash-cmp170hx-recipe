@@ -103,6 +103,22 @@ def test_failures(mode):
         assert len(state['posts']) <= 2
 
 
+def test_drafting_off_checks_generation_without_draft_counters(capsys):
+    """A server without speculative decoding exports no draft counters: --no-draft skips only those."""
+    with endpoint('missing') as (client, state):
+        with pytest.raises(boot.CheckError, match='missing spec-decode counters'):
+            boot.check(client, metrics_wait=0)
+    with endpoint('missing') as (client, state):
+        client.drafting = False
+        boot.check(client, metrics_wait=0)
+        assert len(state['posts']) == 2
+    assert 'PASS: OK; speculative decoding off, draft counters not checked' in capsys.readouterr().out
+    with endpoint('wrong') as (client, state):
+        client.drafting = False
+        with pytest.raises(boot.CheckError, match='expected exactly OK'):
+            boot.check(client, metrics_wait=0)
+
+
 def test_delayed_counters_without_extra_generation(monkeypatch):
     with endpoint() as (client, state):
         original = client.metrics

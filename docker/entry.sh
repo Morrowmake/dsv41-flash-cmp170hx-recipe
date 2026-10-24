@@ -91,6 +91,10 @@ if [ "$ENGRAM_PLACEMENT" = ssd ]; then
     export VLLM_ENGRAM_DIRECT_READ="$ENGRAM_DIRECT_READ"
 fi
 echo "$ENGRAM_LINE"
+if drafting_off; then
+    export VLLM_DSPARK_ADAPTIVE_DEPTH=
+    echo "$DRAFTING_OFF_LINE"
+fi
 
 # 3. Peer access: every peer transport off unless the check passes
 # (p2p_check.sh sets P2P_ENABLED and the transports).
@@ -111,6 +115,7 @@ elif [ "${RECIPE_BOOT_CHECK_OWNER:-}" = start ]; then
 else
     boot_args=()
     [ -z "${RECIPE_CACHE_ROOT:-}" ] || boot_args+=(--container)
+    ! drafting_off || boot_args+=(--no-draft)
     exec "$VENV/bin/python" "$REPO_ROOT/boot_check.py" "${boot_args[@]}" \
         --base "http://127.0.0.1:${PORT:-8000}" \
         --model "${SERVED_MODEL_NAME:-dsv41-flash}" \

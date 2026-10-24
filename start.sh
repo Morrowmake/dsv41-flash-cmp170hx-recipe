@@ -143,7 +143,7 @@ load_env_defaults "$SCRIPT_DIR/.env"
 # Both are filled in at release (tools/set-pin.sh moves the commit pin
 # everywhere at once). The commit pin is read by the release tools, not here.
 # shellcheck disable=SC2034
-RELEASE_VLLM_COMMIT={{PIN}}
+RELEASE_VLLM_COMMIT=a0c57b52376efd67c57735bc949d4bafa22ae29e
 RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:f67d9be47ffbd4a8b84c77fe76bdb3f842187d9b2786fff573e390ae5361bfb0
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 # Where the checkpoints are: MODELS_DIR (a relative path is taken from this
@@ -184,6 +184,10 @@ case "$ENGRAM_SETTING" in auto|ram|ssd) ;; *) die "VLLM_ENGRAM_PLACEMENT must be
 case "${NEED_RAM_GIB:-0}" in *[!0-9]*) die "NEED_RAM_GIB must be a whole number of GiB, not '$NEED_RAM_GIB'" ;; esac
 CONTAINER_NAME="${CONTAINER_NAME:-dsv41-flash}"
 SHM_SIZE="${SHM_SIZE:-16g}"
+# The container's memory limit, swap included, set to the host's memory: the
+# server never swaps. Swapped-out Engram tables cost ~8 % of prefill speed.
+MEM_LIMIT="${MEM_LIMIT:-$(awk '$1 == "MemTotal:" {print $2 "k"}' "${RECIPE_MEMINFO:-/proc/meminfo}" 2>/dev/null || true)}"
+[ -n "$MEM_LIMIT" ] || die "cannot read MemTotal from /proc/meminfo: set MEM_LIMIT (for example 256g)"
 CACHE_DIR="${CACHE_DIR:-$SCRIPT_DIR/cache}"
 READY_TIMEOUT="${READY_TIMEOUT:-3600}"
 BOOT_CHECK="${BOOT_CHECK:-1}"
@@ -331,6 +335,7 @@ preflight_ram() {
     local need="${NEED_RAM_GIB:-$ENGRAM_NEED_RAM_GIB_DEFAULT}"
     server_is_ours && { log "  Engram tables: in use by our server"; return 0; }
     engram_placement || exit 1
+    ! drafting_off || log "  $DRAFTING_OFF_LINE"
     if [ "$ENGRAM_SETTING" = ram ]; then
         [ -n "$ENGRAM_AVAIL_GIB" ] || { warn "  host RAM: cannot read /proc/meminfo — skipping the check"; return 0; }
         if [ "$ENGRAM_AVAIL_GIB" -lt "$need" ]; then
@@ -517,6 +522,9 @@ container_env() {
     for k in $CONTAINER_KEYS; do
         [ -n "${!k+x}" ] && printf '%s=%s\n' "$k" "${!k}"
     done
+    # Speculative decoding off in EXTRA_ARGS: the adaptive depth goes too
+    # (engram_placement.sh, drafting_off).
+    ! drafting_off || export VLLM_DSPARK_ADAPTIVE_DEPTH=
     env | LC_ALL=C sort | grep -E '^(VLLM_|NCCL_|PYTORCH_CUDA_ALLOC_CONF=)' \
         | grep -vE '^VLLM_(COMMIT|REPO|BRANCH|SRC|USE_PRECOMPILED|PRECOMPILED_[A-Z_]*|API_KEY|IMAGE_CACHE_SEED)=' || true
 }
@@ -527,7 +535,7 @@ container_args() {
     mapfile -t mounts < <(model_mounts ro)
     CRUN=(docker run -d --name "$CONTAINER_NAME" --label "$LABEL=$SCRIPT_DIR"
         --user "$(id -u):$(id -g)" --workdir /cache
-        --gpus all --shm-size "$SHM_SIZE"
+        --gpus all --shm-size "$SHM_SIZE" --memory "$MEM_LIMIT" --memory-swap "$MEM_LIMIT"
         -p "$(publish_addr):8000"
         --env-file "$envfile"
         -v "$SCRIPT_DIR/docker/entry.sh:/recipe/entry.sh:ro"
@@ -685,7 +693,8 @@ wait_ready() {
                     # connection readiness inside the original launch budget.
                     python3 "$SCRIPT_DIR/boot_check.py" --wait-ready \
                         --ready-timeout "$((READY_TIMEOUT - (SECONDS - started)))" \
-                        --base "http://$CLIENT_HOST:$PORT" --model "$SERVED_MODEL_NAME" "${log_args[@]}" &
+                        --base "http://$CLIENT_HOST:$PORT" --model "$SERVED_MODEL_NAME" "${log_args[@]}" \
+                        $(drafting_off && echo --no-draft) &
                     checker=$!
                     trap 'kill "$checker" 2>/dev/null || true; wait "$checker" 2>/dev/null || true; do_stop; exit 1' INT TERM
                     while kill -0 "$checker" 2>/dev/null; do

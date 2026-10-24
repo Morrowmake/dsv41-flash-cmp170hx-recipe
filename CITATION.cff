@@ -5,5 +5,5 @@ authors:
   - name: Morrowmake
 repository-code: "https://github.com/Morrowmake/dsv41-flash-cmp170hx-recipe"
 license: MIT
-version: {{VERSION}}
-date-released: {{RELEASE_DATE}}
+version: 1.0.0
+date-released: 2026-10-24

@@ -44,7 +44,7 @@ and `OFFICIAL_REVISION` (`1bae0e1088993b9b82de08f59de5be5a34e42170`), for
 `./start.sh` and Docker Compose alike. Checkpoints you already have are kept.
 
 **The first boot after an install or an update is slower.** The image ships
-no warm-cache seed (seed: {{SEED_YES_NO}}): it compiles on first boot (cold).
+no warm-cache seed (seed: no): it compiles on first boot (cold).
 The kernels go into `./cache`, and later boots reuse them. Loading the Engram
 tables into host memory (or, read from the SSD, filling the row cache) also
 takes a while on every start. While a build runs,
@@ -140,6 +140,8 @@ Commonly used from `.env.advanced.example`:
 | `NEED_RAM_GIB` | `212` | host memory the Engram tables in RAM need: below it `auto` picks `ssd` and an explicit `ram` stops |
 | `HF_TOKEN` | unset | a Hugging Face token makes the download faster |
 
+`EXTRA_ARGS="--speculative-config None"` serves without speculative decoding; the start clears `VLLM_DSPARK_ADAPTIVE_DEPTH` with it and says so in one line.
+
 Every setting in both example files is commented out and shows its default;
 uncommenting one in `.env` overrides that default. A `.env` you have not edited
 therefore picks up a later release's new defaults without changes. To move to
@@ -162,7 +164,9 @@ and stops its own launch on an incorrect reply, incomplete stream, missing
 counters or insufficient drafting. These are the only two boot generation
 requests; starting an already-running checkout sends none. Keep user requests
 out of startup so the model-wide counters describe the check. Compose launches
-use the same check. `smoke.sh` retains its two independent chat/tool requests;
+use the same check. With speculative decoding off in `EXTRA_ARGS` there are no
+draft counters: the check then asks only for the reply and the stream, and says
+so. `smoke.sh` retains its two independent chat/tool requests;
 it does not repeat the boot check.
 
 ## Host memory and the Engram tables

@@ -62,6 +62,8 @@ def test_compose_runs_the_start_container_after_prepare():
     assert prepare['entrypoint'] == ['/bin/bash', '/recipe/prepare.sh'] and prepare['command'] == ['prepare']
     assert server['entrypoint'] == ['/bin/bash', '/recipe/prepare.sh', 'serve']
     assert 'command' not in server and server['shm_size'] == '16g'
+    # Swap included, the same limit: the server never swaps.
+    assert server['mem_limit'] == server['memswap_limit'] == '${MEM_LIMIT:-1024g}'
     assert server['env_file'] == ['docker/container.env']
     for name in ('docker/entry.sh', 'boot_check.py', 'p2p_check.py', 'p2p_check.sh', 'p2p_probe.cu',
                  'engram_placement.sh'):
@@ -337,6 +339,20 @@ def test_container_runs_the_entry_with_read_only_checkpoints(tmp_path):
     assert not any('serve.sh' in a for a in out)
 
 
+def test_container_never_swaps(tmp_path):
+    """The container's memory limit, swap included, is the host's memory, so the Engram tables are never
+    swapped out; MEM_LIMIT overrides."""
+    body = 'container_args /env\nprintf "%s\\n" "${CRUN[@]}"\n'
+    out = run_start(tmp_path, body, **host_memory(tmp_path, 300)).stdout.splitlines()
+    total = f'{512 * 1048576}k'
+    assert out[out.index('--memory') + 1] == out[out.index('--memory-swap') + 1] == total
+    out = run_start(tmp_path, body, MEM_LIMIT='200g').stdout.splitlines()
+    assert out[out.index('--memory') + 1] == out[out.index('--memory-swap') + 1] == '200g'
+    (tmp_path / 'empty').write_text('')
+    run = run_start(tmp_path, body, RECIPE_MEMINFO=str(tmp_path / 'empty'))
+    assert run.returncode != 0 and 'set MEM_LIMIT' in run.stderr
+
+
 def host_memory(root, avail_gib):
     """Fake /proc/meminfo and an empty cgroup directory (no limit) for engram_placement.sh."""
     (root / 'meminfo').write_text(f'MemTotal: {512 * 1048576} kB\nMemAvailable: {avail_gib * 1048576} kB\n')
@@ -410,6 +426,23 @@ def test_need_reaches_the_container_only_when_set(tmp_path):
     assert run.returncode == 0 and 'NEED_RAM_GIB' not in run.stdout
     run = run_start(tmp_path, 'container_env\n', NEED_RAM_GIB='150')
     assert 'NEED_RAM_GIB=150' in run.stdout.splitlines()
+
+
+def test_drafting_off_reaches_the_container_without_the_adaptive_depth(tmp_path):
+    """EXTRA_ARGS turning speculative decoding off clears VLLM_DSPARK_ADAPTIVE_DEPTH in the container's
+    environment (the drafter's state is what it works on) and the preflight says so in one line."""
+    policy = {'VLLM_DSPARK_ADAPTIVE_DEPTH': '/policy.json'}
+    run = run_start(tmp_path, 'container_env\n', EXTRA_ARGS='--speculative-config None', **policy)
+    assert run.returncode == 0, run.stderr
+    assert 'VLLM_DSPARK_ADAPTIVE_DEPTH=' in run.stdout.splitlines()
+    run = run_start(tmp_path, 'container_env\n', EXTRA_ARGS='--max-model-len 8192', **policy)
+    assert 'VLLM_DSPARK_ADAPTIVE_DEPTH=/policy.json' in run.stdout.splitlines()
+    body = 'server_is_ours() { return 1; }\npreflight_ram\n'
+    run = run_start(tmp_path, body, EXTRA_ARGS='--speculative-config=off', **host_memory(tmp_path, 300))
+    assert run.returncode == 0, run.stderr
+    assert 'Speculative decoding: off (EXTRA_ARGS)' in run.stdout
+    start = (ROOT / 'start.sh').read_text()
+    assert '$(drafting_off && echo --no-draft) &' in start
 
 
 def test_unknown_placement_and_layout_refuse(tmp_path):

@@ -22,7 +22,7 @@ OUT="${OUT:-$HERE/out}"
 BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
 VLLM_BRANCH="${VLLM_BRANCH:-ampere}"
-RELEASE_VLLM_COMMIT='{{PIN}}'
+RELEASE_VLLM_COMMIT='a0c57b52376efd67c57735bc949d4bafa22ae29e'
 VLLM_COMMIT="${VLLM_COMMIT:-$RELEASE_VLLM_COMMIT}"
 # Upstream compiled extensions: the nightly wheel of the pin's upstream base
 # 4e0681ed56 itself. Our own extensions come from NATIVE_DIR (above).

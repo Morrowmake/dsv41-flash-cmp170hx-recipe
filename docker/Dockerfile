@@ -25,7 +25,7 @@
 # default); the recipe runs it through its docker/entry.sh, which checks peer
 # access and runs the boot check first (container.env in this folder).
 #
-#   bash docker/build-docker.sh vllm-cmp170hx:engine-{{PIN}}
+#   bash docker/build-docker.sh vllm-cmp170hx:engine-a0c57b5237
 # The wrapper validates the final layer count; Dockerfile instructions cannot
 # inspect the inherited base image manifest.
 
@@ -33,7 +33,7 @@ ARG BASE=nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce
 
 ARG IMAGE_LAYERED=1
 
-ARG VLLM_COMMIT={{PIN}}
+ARG VLLM_COMMIT=a0c57b52376efd67c57735bc949d4bafa22ae29e
 ARG NATIVE_MANIFEST_SHA256=aa940260d8787ab9d596892693d730ccf6e82855dd2f17a7116c04a31e1c2717
 
 FROM ${BASE} AS build
@@ -122,7 +122,7 @@ COPY --from=build /payload/engine/opt/recipe/ /opt/recipe/
 
 FROM runtime-${IMAGE_LAYERED}
 ARG VLLM_COMMIT
-ARG IMAGE_TAG=engine-{{PIN}}
+ARG IMAGE_TAG=engine-a0c57b5237
 ENV PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     VIRTUAL_ENV=/opt/venv \
     CUDA_HOME=/usr/local/cuda \

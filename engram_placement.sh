@@ -131,3 +131,26 @@ engram_placement() {
     fi
     ENGRAM_LINE="$ENGRAM_LINE; slower), $cache, $preload, $direct"
 }
+
+# Speculative decoding switched off through EXTRA_ARGS
+# (`--speculative-config None`, `null` or `off`, also written with `=`).
+# Without the drafter the adaptive verify depth has no state to work on and
+# the server stops while capturing its CUDA graphs, and the boot check has no
+# draft counters to read. drafting_off returns 0 when drafting is off; the
+# entry and start.sh then clear VLLM_DSPARK_ADAPTIVE_DEPTH and run the boot
+# check without its draft-counter checks.
+drafting_off() {
+    local -a args
+    local i value
+    read -ra args <<< "${EXTRA_ARGS:-}"
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        case "${args[i]}" in
+            --speculative-config=*) value="${args[i]#*=}" ;;
+            --speculative-config) value="${args[i+1]:-}" ;;
+            *) continue ;;
+        esac
+        case "${value,,}" in none|null|off|''|\'\'|'""') return 0 ;; esac
+    done
+    return 1
+}
+DRAFTING_OFF_LINE="Speculative decoding: off (EXTRA_ARGS); VLLM_DSPARK_ADAPTIVE_DEPTH cleared, boot check without draft counters"

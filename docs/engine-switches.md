@@ -66,7 +66,7 @@ Speculative decoding:
 |---|---|---|
 | `VLLM_DSPARK_PER_K_WIDTH` | `1` | the drafter and the verify step built for the step's true width, so a narrower step costs less |
 | `VLLM_DSPARK_DEPTH_HINT` | `full=7,5;base=5,5` | seven drafts only while a single request runs, five otherwise |
-| `VLLM_DSPARK_ADAPTIVE_DEPTH` | the policy file shipped in the engine | from three requests on, each step's verify width chosen from each request's acceptance two rounds back; a request keeps only the drafts worth verifying, so greedy output is unchanged |
+| `VLLM_DSPARK_ADAPTIVE_DEPTH` | the policy file shipped in the engine | from three requests on, each step's verify width chosen from each request's acceptance two rounds back; a request keeps only the drafts worth verifying, so greedy output is unchanged (cleared at start when `EXTRA_ARGS` turns speculative decoding off) |
 
 Communication between the cards:
 

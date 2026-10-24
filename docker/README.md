@@ -7,8 +7,8 @@ image, how to build it, and how to run it by hand with `docker run`.
 
 ## What the image contains
 
-- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/{{PIN}})
-  pinned at `{{PIN}}`, on upstream `4e0681ed56`, installed
+- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/a0c57b52376efd67c57735bc949d4bafa22ae29e)
+  pinned at `a0c57b52376efd67c57735bc949d4bafa22ae29e`, on upstream `4e0681ed56`, installed
   editable in `/opt/venv` (Python 3.12, torch 2.13.0, CUDA 13.0 build) with the
   upstream compiled extensions from `4e0681ed56`'s own nightly wheel, then the
   runtime extras the engine pins. The installed package list is in
@@ -32,7 +32,7 @@ image, how to build it, and how to run it by hand with `docker run`.
   ordered-pair and size breakdowns on an uncached check. Content verification
   remains cached by driver, ordered GPU UUIDs, source hash and host boot.
 - **No compilation-cache seed** unless the release says so (seed:
-  {{SEED_YES_NO}}); without one, the first start compiles its kernels into the
+  no); without one, the first start compiles its kernels into the
   cache mount.
 - **No weights.** The checkpoints are mounted from the host. The engine source
   in `/opt/vllm-src` includes the builder the recipe uses to make the hybrid
@@ -41,10 +41,10 @@ image, how to build it, and how to run it by hand with `docker run`.
 Engine image tag:
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx:engine-{{PIN}}
+ghcr.io/morrowmake/vllm-cmp170hx:engine-a0c57b5237
 ```
 
-The OCI revision is `{{PIN}}`.
+The OCI revision is `a0c57b52376efd67c57735bc949d4bafa22ae29e`.
 Image tags identify engine source, independently of recipe release numbers.
 Publication requires validation and acceptance of the exact image digest.
 
@@ -120,7 +120,7 @@ a source reachable inside the build.
 Build the release source with Docker:
 
 ```bash
-bash docker/build-docker.sh vllm-cmp170hx:engine-{{PIN}}
+bash docker/build-docker.sh vllm-cmp170hx:engine-a0c57b5237
 ```
 
 Both build paths print the total filesystem layer count, including the base,
@@ -161,13 +161,14 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-{{PIN}}
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-a0c57b5237
 MODELS=$PWD/models                  # the three directories ./download.sh made
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
+MEM=$(awk '$1 == "MemTotal:" {print $2 "k"}' /proc/meminfo)   # limit, swap included: never swap
 mkdir -p "$CACHE"
 
 docker run -d --name dsv41-flash --user "$(id -u):$(id -g)" --workdir /cache \
-  --gpus all --shm-size 16g \
+  --gpus all --shm-size 16g --memory "$MEM" --memory-swap "$MEM" \
   -p 127.0.0.1:8000:8000 \
   --env-file docker/container.env \
   -v "$PWD/docker/entry.sh:/recipe/entry.sh:ro" \

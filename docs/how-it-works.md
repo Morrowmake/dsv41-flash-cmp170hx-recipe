@@ -65,8 +65,8 @@ Every feature has a switch ([Engine switches](engine-switches.md)).
 | Model id | `dsv41-flash` |
 | Weights | the hybrid of [`LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw`](https://huggingface.co/LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw) (routed experts, EXL3 2.9 bpw) and [`deepseek-ai/DeepSeek-V4.1-Flash-1017`](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017) (everything else) |
 | Drafter | DSpark, inside the checkpoint: up to 7 draft tokens per step at one request, 5 at two to eight; from three requests the verify width is chosen per step |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`{{PIN}}`](https://github.com/Morrowmake/vllm-cmp170hx/commit/{{PIN}}), on upstream vLLM `4e0681ed56` |
-| Container image | `ghcr.io/morrowmake/vllm-cmp170hx:engine-{{PIN}}`, pinned by digest in `start.sh` — the engine at that pin and the release's launch, no weights ([docker/](../docker/README.md)) |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`a0c57b52376efd67c57735bc949d4bafa22ae29e`](https://github.com/Morrowmake/vllm-cmp170hx/commit/a0c57b52376efd67c57735bc949d4bafa22ae29e), on upstream vLLM `4e0681ed56` |
+| Container image | `ghcr.io/morrowmake/vllm-cmp170hx:engine-a0c57b5237`, pinned by digest in `start.sh` — the engine at that pin and the release's launch, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4 with expert parallelism; assumes PCIe Gen2 x16 |
 | Context | 262,144 tokens |
 | Concurrency | up to 8 requests; the scheduler's budget is 2,048 tokens per step |
