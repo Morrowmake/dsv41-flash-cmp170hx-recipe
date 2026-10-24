@@ -206,6 +206,11 @@ Citation metadata: [`CITATION.cff`](CITATION.cff).
   EXL3 format.
 - **[MiaAI-Lab](https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-EXL3-2x-DGX-Sparks)**
   for publishing the benchmark prompts and protocol used in the decode tables.
+- **[GNmac-lab](https://github.com/GNmac-lab/deepseek-v41-flash-1017-cmp170hx)**
+  for the grouped FP8 `wo_a` GEMM the engine adapts
+  (`vllm/models/deepseek_v41/nvidia/ops/sm80_wo_a_grouped.py`, MIT, its notice
+  kept in that file), and for the ideas behind the side-stream mHC and the
+  sharded target argmax.
 
 ## Source
 
