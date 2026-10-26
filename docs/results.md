@@ -34,6 +34,8 @@ token, the median of two requests.
 | Prompt reading (cold prefill, 32,768 tokens), tok/s | 3,808 |
 | KV pool, tokens | 1,247,406 |
 
+All speeds are up to, in tok/s.
+
 ## Quality
 
 Scored on the answer after the reasoning (`content`), fixed-order batches of up
@@ -65,4 +67,6 @@ Each measured on one boot of the release image, prose prompts, same protocol:
 | Engram tables from the SSD (`VLLM_ENGRAM_PLACEMENT=ssd`), 48 GiB row cache per card | 151 | 428 | 3,607 |
 | Without peer-to-peer (`P2P=off`) | 133 | 344 | 3,804 |
 
-Without peer-to-peer, two and four users reach 192 and 271 tok/s.
+All speeds are up to, in tok/s.
+
+Without peer-to-peer, two and four users reach up to 192 and 271 tok/s.

@@ -5,8 +5,7 @@
 First release: DeepSeek-V4.1-Flash-1017 on four CMP 170HX cards.
 
 - Engine: Morrowmake/vllm-cmp170hx at `a0c57b52376efd67c57735bc949d4bafa22ae29e`, on upstream vLLM
-  `4e0681ed56`; image `ghcr.io/morrowmake/vllm-cmp170hx@sha256:f67d9be47ffbd4a8b84c77fe76bdb3f842187d9b2786fff573e390ae5361bfb0`
-  (seed: no).
+  `4e0681ed56`; image `ghcr.io/morrowmake/vllm-cmp170hx@sha256:f67d9be47ffbd4a8b84c77fe76bdb3f842187d9b2786fff573e390ae5361bfb0`.
 - **Model.** A hybrid checkpoint built on your machine as links into two
   downloads: the routed experts from
   `LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw` (EXL3, 2.9 bits per
@@ -42,7 +41,7 @@ First release: DeepSeek-V4.1-Flash-1017 on four CMP 170HX cards.
   boot check before it.
   Settings in `.env` override the defaults.
 - Measured on the release image (tokens per second over each run, time to the
-  first token included): one user 319 structured, 287 code, 162 prose; eight
-  users together 765, 729 and 432; cold prefill 3,818 (2K prompt) and 3,808
-  (32K); a 1,247,406-token KV pool. HumanEval 157/164 and GSM8K 1,280/1,319,
+  first token included): one user up to 319 structured, 287 code, 162 prose;
+  eight users together up to 765, 729 and 432; cold prefill up to 3,818 (2K
+  prompt) and 3,808 (32K); a 1,247,406-token KV pool. HumanEval 157/164 and GSM8K 1,280/1,319,
   level with the reference ([Results](docs/results.md)).

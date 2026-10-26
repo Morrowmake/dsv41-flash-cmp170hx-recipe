@@ -31,8 +31,7 @@ image, how to build it, and how to run it by hand with `docker run`.
   The startup banner reports build, identity and check time, with transport,
   ordered-pair and size breakdowns on an uncached check. Content verification
   remains cached by driver, ordered GPU UUIDs, source hash and host boot.
-- **No compilation-cache seed** unless the release says so (seed:
-  no); without one, the first start compiles its kernels into the
+- **No compiled kernel cache.** The first start compiles its kernels into the
   cache mount.
 - **No weights.** The checkpoints are mounted from the host. The engine source
   in `/opt/vllm-src` includes the builder the recipe uses to make the hybrid

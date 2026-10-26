@@ -43,9 +43,9 @@ validated with: `EXPORT_REVISION` (`c178a01284fc5c0e859d8668cffaac81ca8f4042`)
 and `OFFICIAL_REVISION` (`1bae0e1088993b9b82de08f59de5be5a34e42170`), for
 `./start.sh` and Docker Compose alike. Checkpoints you already have are kept.
 
-**The first boot after an install or an update is slower.** The image ships
-no warm-cache seed (seed: no): it compiles on first boot (cold).
-The kernels go into `./cache`, and later boots reuse them. Loading the Engram
+**The first boot after an install or an update is slower.** The image carries
+no compiled kernels: the first boot compiles them into `./cache`, and later
+boots reuse them. Loading the Engram
 tables into host memory (or, read from the SSD, filling the row cache) also
 takes a while on every start. While a build runs,
 the log can show lines like

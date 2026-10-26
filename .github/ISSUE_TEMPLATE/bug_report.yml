@@ -31,9 +31,11 @@ body:
     id: engram
     attributes:
       label: Engram tables
-      description: VLLM_ENGRAM_PLACEMENT
+      description: VLLM_ENGRAM_PLACEMENT; the startup log's "Engram tables:" line says which was used
       options:
-        - ram (default)
+        - auto (default), log says ram
+        - auto (default), log says ssd
+        - ram
         - ssd
     validations:
       required: true

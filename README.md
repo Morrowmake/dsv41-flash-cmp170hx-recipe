@@ -13,9 +13,9 @@
 </p>
 
 **DeepSeek-V4.1-Flash with a 262,144-token context, served on four CMP 170HX
-cards: 319 tok/s for one user on structured output (287 on code, 162 on prose)
-and up to 765 tok/s across eight, 3,808 tok/s cold prefill of a 32K prompt and a
-1,247,406-token KV pool. The routed
+cards: up to 319 tok/s for one user on structured output (287 on code, 162 on
+prose) and up to 765 tok/s across eight, up to 3,808 tok/s cold prefill of a
+32K prompt and a 1,247,406-token KV pool. The routed
 experts are EXL3 at 2.9 bits per weight; every other weight is DeepSeek's own
 FP8 or BF16, unchanged, and the KV cache is full precision.**
 
@@ -132,6 +132,8 @@ tokens over its whole duration, time to the first token included.
 | **Prompt reading** (cold prefill, 2K tokens) | 3,818 |
 | **Prompt reading** (cold prefill, 32K tokens) | 3,808 |
 | **KV pool** (tokens) | 1,247,406 |
+
+All speeds are up to, in tok/s.
 
 One user is the rate of a single request; eight users is the combined rate of
 eight simultaneous requests, both in tokens per second. Structured output and code are drafted well, so
