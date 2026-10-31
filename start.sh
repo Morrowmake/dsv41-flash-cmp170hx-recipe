@@ -147,7 +147,7 @@ RELEASE_UPSTREAM_COMMIT=330c5bffeeb48725c0502a351e8ead2b54bd81eb
 RELEASE_QUEUE_COMMIT=0af5991c009e0c3ff4181f026a8e7dffe1370b45
 RELEASE_PLUGIN_COMMIT=0b34823c39ba0fd5c0d4690887882b4cfa69034e
 RELEASE_NATIVE_BUILD=native-6a7c62b43c-t2.14.0
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:7a91d23f94ca750ecd27b467a9b1bd4ad2260f8cb25751379cec57826ca3514f
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:6e02917e575153f2f0d9415c8f528c7b895979db89ad1e5520065f8e0c53d35e
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 # Where the checkpoints are: MODELS_DIR (a relative path is taken from this
 # checkout), models/ here by default. Each checkpoint is a plain directory in
