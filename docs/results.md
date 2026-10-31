@@ -1,5 +1,47 @@
 # Results
 
+## Release 1.0.1
+
+Measured 2026-10-31 on 4× CMP 170HX by this release's own release check:
+upstream vLLM `330c5bffee` with the patch queue `0af5991c00` and the plugin
+`vllm_sm80` `0b34823c39`, the image this release pins
+(`sha256:6e02917e575153f2f0d9415c8f528c7b895979db89ad1e5520065f8e0c53d35e`),
+and the release defaults, on 74 SMs per card, mainline cmpunlocker plus the
+minimal P2P patch, verified P2P, PCIe x16 links, 262,144-token context, the
+Engram tables in host RAM and 180 W per card. Method as for 1.0.0 below; each
+prompt set on one boot.
+
+| Users | Structured | Code | Prose | 1.0.0 (structured / code / prose) |
+|---|---:|---:|---:|---|
+| 1 | 290 | 292 | 166 | 319 / 287 / 162 |
+| 2, total | 382 | 448 | 250 | 360 / 431 / 230 |
+| 4, total | 495 | 592 | 342 | 545 / 602 / 324 |
+| 8, total | 852 | 794 | 457 | 765 / 729 / 432 |
+
+| | 1.0.1 | 1.0.0 |
+|---|---:|---:|
+| Prompt reading (cold prefill, 2,048 tokens), tok/s | 3,758 | 3,818 |
+| Prompt reading (cold prefill, 32,768 tokens), tok/s | 3,790 | 3,808 |
+| KV pool, tokens | 1,295,894 | 1,247,406 |
+
+All speeds are up to, in tok/s.
+
+**Quality**, scored as for 1.0.0, against the 1.0.0 release: HumanEval
+158 / 164 (1.0.0: 157), GSM8K 1,279 / 1,319 (1.0.0: 1,280); McNemar exact
+two-sided p = 1 on both. The release also reproduced the exact-model anchor
+(587 of 587 positions), found every needle up to 262,000 tokens (30 / 30) and
+held memory flat over 200 varying-tail requests.
+
+**Fallbacks**, each measured on one boot of the release image, prose prompts,
+same protocol:
+
+| | 1 user | 2 users, total | 4 users, total | 8 users, total | Cold prefill 2,048 tokens, tok/s |
+|---|---:|---:|---:|---:|---:|
+| Engram tables from the SSD (`VLLM_ENGRAM_PLACEMENT=ssd`), 48 GiB row cache per card | 163 | — | — | 463 | 3,591 |
+| Without peer-to-peer (`P2P=off`) | 136 | 196 | 275 | 354 | 3,694 |
+
+All speeds are up to, in tok/s.
+
 ## Release 1.0.0
 
 Measured 2026-10-24 on 4× CMP 170HX by this release's own release check:

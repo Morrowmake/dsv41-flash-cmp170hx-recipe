@@ -5,26 +5,26 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/a0c57b52376efd67c57735bc949d4bafa22ae29e"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20a0c57b52376efd67c57735bc949d4bafa22ae29e-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20330c5bffee%20%2B%20vllm__sm80%200b34823c39-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.0.0-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.0.1-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
 
 **DeepSeek-V4.1-Flash with a 262,144-token context, served on four CMP 170HX
-cards: up to 319 tok/s for one user on structured output (287 on code, 162 on
-prose) and up to 765 tok/s across eight, up to 3,808 tok/s cold prefill of a
-32K prompt and a 1,247,406-token KV pool. The routed
+cards: up to 290 tok/s for one user on structured output (292 on code, 166 on
+prose) and up to 852 tok/s across eight, up to 3,790 tok/s cold prefill of a
+32K prompt and a 1,295,894-token KV pool. The routed
 experts are EXL3 at 2.9 bits per weight; every other weight is DeepSeek's own
 FP8 or BF16, unchanged, and the KV cache is full precision.**
 
 This repository installs and runs **DeepSeek-V4.1-Flash-1017** on **four NVIDIA
 CMP 170HX cards** behind an OpenAI-compatible API, with tool calls, reasoning
 and images, and the checkpoint's own **DSpark** speculative drafter. The CMP
-170HX is Ampere (sm_80). Our
-[vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere) adds the
-Ampere kernels that make the model run at all, then spends the rest of its
+170HX is Ampere (sm_80). Upstream vLLM with our patch queue and the sm_80
+plugin `vllm_sm80` ([source](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin))
+adds the Ampere kernels that make the model run at all, then spends the rest of its
 patches on making it fast and making it repeatable. It runs only as a container
 image, so the engine and its Python environment stay out of your system.
 P2P is enabled automatically after a startup [content check](docs/how-to-use.md#pcie-peer-to-peer) passes; otherwise the server runs with P2P disabled.
@@ -113,7 +113,7 @@ was validated with.
 
 ## Headline numbers
 
-Measured 2026-10-24 on 4× CMP 170HX, 74 SMs per card, mainline
+Measured 2026-10-31 on 4× CMP 170HX, 74 SMs per card, mainline
 cmpunlocker with P2P, recipe defaults, 262,144-token context, 180 W per card
 and PCIe x16 links, by this release's own release check. Decode uses the
 MiaAI-Lab protocol: 400 tokens, temperature 0, requests sent with thinking off;
@@ -121,17 +121,17 @@ structured and code from its first prompt set, prose from its second, each set
 on its own boot. Every figure is the median of five runs, each run's completion
 tokens over its whole duration, time to the first token included.
 
-| | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer) (default after verification) |
-|---|---:|
-| **1 user** · structured | **319** |
-| **1 user** · code | **287** |
-| **1 user** · prose | **162** |
-| **8 users, total** · structured | 765 |
-| **8 users, total** · code | 729 |
-| **8 users, total** · prose | 432 |
-| **Prompt reading** (cold prefill, 2K tokens) | 3,818 |
-| **Prompt reading** (cold prefill, 32K tokens) | 3,808 |
-| **KV pool** (tokens) | 1,247,406 |
+| | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer) (default after verification) | 1.0.0 |
+|---|---:|---:|
+| **1 user** · structured | **290** | 319 |
+| **1 user** · code | **292** | 287 |
+| **1 user** · prose | **166** | 162 |
+| **8 users, total** · structured | 852 | 765 |
+| **8 users, total** · code | 794 | 729 |
+| **8 users, total** · prose | 457 | 432 |
+| **Prompt reading** (cold prefill, 2K tokens) | 3,758 | 3,818 |
+| **Prompt reading** (cold prefill, 32K tokens) | 3,790 | 3,808 |
+| **KV pool** (tokens) | 1,295,894 | 1,247,406 |
 
 All speeds are up to, in tok/s.
 
@@ -178,7 +178,15 @@ the Engram tables costs ~8 % of prefill speed.
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/a0c57b52376efd67c57735bc949d4bafa22ae29e/LICENSE).
+**The engine** — upstream vLLM `330c5bffee` with our patch queue — is
+[Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/dsv41-flash-recipe-1.0.1-queue/LICENSE);
+the `vllm_sm80` plugin is Apache-2.0 with MIT portions adapted from ExLlamaV3
+([licenses](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin/licenses)).
+
+**orjson 3.13.0** ships in the engine image unmodified, compiled; parts of it
+are MPL-2.0 (the rest Apache-2.0 or MIT). Its source:
+[PyPI](https://pypi.org/project/orjson/3.13.0/#files) and
+[ijl/orjson tag 3.13.0](https://github.com/ijl/orjson/tree/3.13.0).
 
 The downloaded models have separate licences, both MIT:
 
@@ -212,15 +220,17 @@ Citation metadata: [`CITATION.cff`](CITATION.cff).
   for publishing the benchmark prompts and protocol used in the decode tables.
 - **[GNmac-lab](https://github.com/GNmac-lab/deepseek-v41-flash-1017-cmp170hx)**
   for the grouped FP8 `wo_a` GEMM the engine adapts
-  (`vllm/models/deepseek_v41/nvidia/ops/sm80_wo_a_grouped.py`, MIT, its notice
+  (`vllm_sm80/models/deepseek_v41/ops/sm80_wo_a_grouped.py`, MIT, its notice
   kept in that file), and for the ideas behind the side-stream mHC and the
   sharded target argmax.
 
 ## Source
 
-The fork contains our maintained changes, inherited upstream code and the
-adaptations credited in its notices —
-[Morrowmake/vllm-cmp170hx @ `ampere`](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere).
+The engine source is upstream vLLM plus our patch queue and the `vllm_sm80`
+plugin, with the adaptations credited in its notices: tags
+[`dsv41-flash-recipe-1.0.1-queue`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-queue)
+and [`dsv41-flash-recipe-1.0.1-plugin`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin)
+on [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx).
 
 ## Acknowledgements
 

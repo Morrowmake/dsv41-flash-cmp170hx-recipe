@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.0.1 — 2026-11-01
+
+Faster decode with more users: each routed expert is now split across the
+four cards.
+
+- **Engine.** Upstream vLLM `330c5bffee` with our patch queue
+  (`0af5991c009e0c3ff4181f026a8e7dffe1370b45`, tag
+  `dsv41-flash-recipe-1.0.1-queue`) and the sm_80 plugin `vllm_sm80`
+  (`0b34823c39ba0fd5c0d4690887882b4cfa69034e`, tag
+  `dsv41-flash-recipe-1.0.1-plugin`); image
+  `ghcr.io/morrowmake/vllm-cmp170hx@sha256:6e02917e575153f2f0d9415c8f528c7b895979db89ad1e5520065f8e0c53d35e`.
+  Torch 2.14.
+- **Layout.** Tensor-parallel 4 with every routed expert split across the
+  four cards instead of whole experts per card: each card holds a column
+  chunk of every expert, rotated per expert and layer so all four cards carry
+  the same routed work (`VLLM_EXL3_MOE_EXPERT_ROTATION`).
+- **Compressed all-reduce** for mid-sized messages
+  (`VLLM_SM80_ALLREDUCE_COMPRESS`), and one rounding for the attention
+  output all-reduce (`VLLM_SM80_ALLREDUCE_ROUND_ONCE`). The all-reduce
+  switches are renamed (`VLLM_SM80_ALLREDUCE`, `VLLM_SM80_PREFILL_REDUCE_OVERLAP`,
+  `VLLM_SM80_SHARD_ARGMAX`); see [Engine switches](docs/engine-switches.md).
+- **Faster start:** the routed experts load faster (`VLLM_EXL3_FAST_LOAD`).
+- **Sampling defaults.** Requests that set neither get the model card's
+  temperature 1.0 and top_p 1.0.
+- **`EXTRA_ARGS` is checked:** it may not set an argument the release fixes
+  (checkpoint, parallel layout, quantisation, memory budget, KV cache); the
+  start stops and names it. `--speculative-config None` still turns drafting
+  off.
+- **Download fixes** ([#2](https://github.com/Morrowmake/dsv41-flash-cmp170hx-recipe/issues/2)):
+  the checkpoint download fetches every file (1.0.0 could skip
+  `config.json`), and the start's disk check counts what an interrupted
+  download already left in `MODELS_DIR`.
+- **`.env`:** no default changed.
+- Measured on the release image (tokens per second over each run, time to the
+  first token included): one user up to 290 structured, 292 code, 166 prose;
+  eight users together up to 852, 794 and 457; cold prefill up to 3,758 (2K
+  prompt) and 3,790 (32K); KV pool 1,295,894 tokens. HumanEval 158/164 and
+  GSM8K 1,279/1,319, level with 1.0.0 ([Results](docs/results.md)).
+
+Update with `./start.sh update` (keeps `.env`).
+
 ## 1.0.0 — 2026-10-24
 
 First release: DeepSeek-V4.1-Flash-1017 on four CMP 170HX cards.
