@@ -6,25 +6,44 @@ import re
 import sys
 
 
-def engine_tag(commit):
+# An assembled engine (upstream + queue + plugin) is named by all three pins: a later release that changes only
+# the plugin on the same queue gets a new tag.
+ASSEMBLY_LABELS = ("org.morrowmake.upstream-commit", "org.morrowmake.queue-commit", "org.morrowmake.plugin-commit")
+
+
+def _full(commit):
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("Engine revision must be a full 40-character commit")
-    return "engine-" + commit[:10]
+    return commit
+
+
+def engine_tag(commit, upstream=None, plugin=None):
+    """engine-<commit 10>; an assembly (UPSTREAM and PLUGIN given, COMMIT its queue): engine-<u10>-<q10>-<p10>."""
+    if upstream is None and plugin is None:
+        return "engine-" + _full(commit)[:10]
+    return "engine-" + "-".join(_full(c)[:10] for c in (upstream, commit, plugin))
 
 
 def target_tag(target):
     repository, separator, tag = target.rpartition(":")
     if (not separator or not repository or "@" in target or
             any(c.isspace() for c in target) or
-            not re.fullmatch(r"engine-[0-9a-f]{10}", tag)):
-        raise ValueError("Image target must use an engine-<10-character-commit> tag")
+            not re.fullmatch(r"engine-[0-9a-f]{10}(-[0-9a-f]{10}-[0-9a-f]{10})?", tag)):
+        raise ValueError("Image target must use an engine-<10-character-commit> tag "
+                         "(an assembly: engine-<upstream 10>-<queue 10>-<plugin 10>)")
     return tag
 
 
 def check_config(config, target):
     labels = config["config"].get("Labels") or {}
     commit = labels.get("org.opencontainers.image.revision")
-    tag = engine_tag(commit)
+    if any(k in labels for k in ASSEMBLY_LABELS):
+        upstream, queue, plugin = (labels.get(k) for k in ASSEMBLY_LABELS)
+        if queue != commit:
+            raise ValueError("Assembly queue label differs from the engine revision")
+        tag = engine_tag(commit, upstream, plugin)
+    else:
+        tag = engine_tag(commit)
     if target_tag(target) != tag:
         raise ValueError("Image target differs from the full engine revision")
     if labels.get("org.opencontainers.image.version") != tag:

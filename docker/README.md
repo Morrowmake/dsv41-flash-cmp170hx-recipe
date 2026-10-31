@@ -47,13 +47,15 @@ image, how to build it, and how to run it by hand with `docker run`.
 Engine image tag:
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx:engine-0af5991c00
+ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-0af5991c00-0b34823c39
 ```
 
-The OCI revision is the queue commit `0af5991c009e0c3ff4181f026a8e7dffe1370b45`;
-labels name all three pins and the native build.
-Image tags identify engine source, independently of recipe release numbers.
-Publication requires validation and acceptance of the exact image digest.
+The tag names all three pins (`engine-<upstream 10>-<queue 10>-<plugin 10>`), so
+a release that changes only the plugin gets a new tag. The OCI revision is the
+queue commit `0af5991c009e0c3ff4181f026a8e7dffe1370b45`; labels name all three
+pins and the native build. Image tags identify engine source, independently of
+recipe release numbers. Publication requires validation and acceptance of the
+exact image digest.
 
 ## Build it
 
@@ -140,7 +142,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-0af5991c00
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-0af5991c00-0b34823c39
 MODELS=$PWD/models                  # the three directories ./download.sh made
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 MEM=$(awk '$1 == "MemTotal:" {print $2 "k"}' /proc/meminfo)   # limit, swap included: never swap

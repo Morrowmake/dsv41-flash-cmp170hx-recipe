@@ -72,7 +72,7 @@ Every feature has a switch ([Engine switches](engine-switches.md)).
 | Weights | the hybrid of [`LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw`](https://huggingface.co/LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw) (routed experts, EXL3 2.9 bpw) and [`deepseek-ai/DeepSeek-V4.1-Flash-1017`](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017) (everything else) |
 | Drafter | DSpark, inside the checkpoint: up to 7 draft tokens per step at one request, 5 at two to eight; from three requests the verify width is chosen per step |
 | Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) patch queue @ [`0af5991c009e0c3ff4181f026a8e7dffe1370b45`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-queue) (tag `dsv41-flash-recipe-1.0.1-queue`) and sm_80 plugin `vllm_sm80` @ [`0b34823c39ba0fd5c0d4690887882b4cfa69034e`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin) (tag `dsv41-flash-recipe-1.0.1-plugin`), on upstream vLLM `330c5bffee` |
-| Container image | `ghcr.io/morrowmake/vllm-cmp170hx:engine-0af5991c00`, pinned by digest in `start.sh` — the engine at those pins and the release's launch, no weights ([docker/](../docker/README.md)) |
+| Container image | `ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-0af5991c00-0b34823c39`, pinned by digest in `start.sh` — the engine at those pins and the release's launch, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4, routed experts split across the four cards with per-expert chunk rotation; assumes PCIe Gen2 x16 |
 | Context | 262,144 tokens |
 | Concurrency | up to 8 requests; the scheduler's budget is 2,048 tokens per step |

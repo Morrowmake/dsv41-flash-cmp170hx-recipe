@@ -11,6 +11,7 @@ import pytest
 
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
+import image_identity
 import oci_layers as oci
 from test_release_image import PIN, base, pin_of, publication_image
 
@@ -23,14 +24,45 @@ def build_pins():
     return {k.lower(): v for k, v in re.findall(r"^RELEASE_([A-Z0-9_]+)='([^']*)'$", build, re.M)}
 
 
-def test_rootless_tag_is_the_queue_pin_and_ignores_recipe_version():
+def test_rootless_tag_names_the_three_pins_and_ignores_recipe_version():
     prelude = (ROOT / "build.sh").read_text().split("\nPIP=", 1)[0]
     prelude = prelude.replace('HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
                               "HERE=" + shlex.quote(str(ROOT)))
     run = subprocess.run(["bash", "-c", prelude + '\nprintf "%s\n" "$TAG"\n'],
                          env=dict(os.environ, RELEASE="9.9.9"), capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
-    assert run.stdout.strip() == "engine-" + build_pins()["queue_commit"][:10]
+    pins = build_pins()
+    assert run.stdout.strip() == "engine-" + "-".join(
+        pins[k][:10] for k in ("upstream_commit", "queue_commit", "plugin_commit"))
+
+
+def test_assembly_tag_is_bound_to_its_three_pin_labels(tmp_path):
+    """An assembly's tag names upstream, queue and plugin; the queue-only tag, a tag of another plugin or a
+    target whose labels disagree are refused, before compression and at the target check."""
+    upstream, queue, plugin = "c" * 40, PIN, "d" * 40
+    labels = {"org.morrowmake.upstream-commit": upstream, "org.morrowmake.queue-commit": queue,
+              "org.morrowmake.plugin-commit": plugin}
+    tag = "engine-" + "-".join(c[:10] for c in (upstream, queue, plugin))
+    assert image_identity.engine_tag(queue, upstream, plugin) == tag
+    assert image_identity.target_tag("fixture:" + tag) == tag
+    payload = tmp_path / "payload"
+    for name in ("python", "dependencies", "native", "engine"):
+        (payload / name).mkdir(parents=True)
+    b = base(tmp_path)
+    for wrong in ("engine-" + queue[:10], "engine-" + "-".join(c[:10] for c in (upstream, queue, "e" * 40))):
+        with pytest.raises(ValueError, match="tag differs"):
+            oci.assemble(b, payload, tmp_path / "out/oci", queue, wrong, {}, pin_of(b), parallel=False,
+                         extra_labels=labels)
+    oci.assemble(b, payload, tmp_path / "out/oci", queue, tag, {}, pin_of(b), parallel=False, extra_labels=labels)
+    config = json.loads((tmp_path / "out/config.json").read_text())
+    assert config["config"]["Labels"]["org.opencontainers.image.version"] == tag
+    assert config["config"]["Labels"]["org.opencontainers.image.revision"] == queue
+    assert image_identity.check_config(config, "fixture:" + tag) == queue
+    with pytest.raises(ValueError, match="differs"):
+        image_identity.check_config(config, "fixture:engine-" + queue[:10])
+    config["config"]["Labels"]["org.morrowmake.queue-commit"] = "f" * 40
+    with pytest.raises(ValueError, match="queue label differs"):
+        image_identity.check_config(config, "fixture:" + tag)
 
 
 def test_build_sh_pins_are_the_recipe_s_and_the_assembly_s():

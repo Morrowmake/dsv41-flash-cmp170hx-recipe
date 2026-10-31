@@ -141,7 +141,8 @@ def assemble(base, payload, out, pin, tag, env, base_pin, layered=True, parallel
     """base_pin = (index digest, manifest digest): the base layout must be that base
     (verify_base), and the labels name it from that verified identity. An assembled engine's image
     (build.sh) passes its own entry point and its pins as extra labels."""
-    if tag != engine_tag(pin):
+    labels = extra_labels or {}
+    if tag != engine_tag(pin, labels.get("org.morrowmake.upstream-commit"), labels.get("org.morrowmake.plugin-commit")):
         raise ValueError("Image tag differs from the full engine revision")
     identity = verify_base(base, *base_pin)
     manifest, config = image(base)

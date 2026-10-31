@@ -56,7 +56,9 @@ SRC_GIT="$STAGE/src.git"
 FILES="$STAGE/assembly-files.json"
 export UV_CONSTRAINT="$CONSTRAINTS" CUDA_VISIBLE_DEVICES=""
 log_features() { printf "[image] layered=%s parallel_compression=%s\n" "${IMAGE_LAYERED:-1}" "${IMAGE_PARALLEL_COMPRESSION:-1}"; }
-TAG="$(python3 "$HERE/image_identity.py" tag "$RELEASE_QUEUE_COMMIT")"
+# The image tag names all three pins: engine-<upstream 10>-<queue 10>-<plugin 10>.
+TAG="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from image_identity import engine_tag; print(engine_tag(*sys.argv[2:]))' \
+    "$HERE" "$RELEASE_QUEUE_COMMIT" "$RELEASE_UPSTREAM_COMMIT" "$RELEASE_PLUGIN_COMMIT")"
 PIP=(--extra-index-url https://flashinfer.ai/whl/)
 export UV_LINK_MODE=copy PYTHONDONTWRITEBYTECODE=1 UV_NO_CONFIG=1
 # git records an identity in reflogs; keep the build free of the builder's

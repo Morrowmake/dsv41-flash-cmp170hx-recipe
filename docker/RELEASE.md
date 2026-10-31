@@ -139,7 +139,7 @@ artifacts: distribute only trusted, audited release bundles.
 
 ```bash
 CUDA_VISIBLE_DEVICES="" IMAGE_PUBLISH=1 CRANE=/path/to/crane ./docker/push.sh \
-  /path/to/output/oci ghcr.io/morrowmake/vllm-cmp170hx:<version>-<short-commit> \
+  /path/to/output/oci ghcr.io/morrowmake/vllm-cmp170hx:engine-<upstream 10>-<queue 10>-<plugin 10> \
   sha256:<exact-final-manifest> /path/to/reviewed-acceptance.json < /path/to/private-token
 ```
 
