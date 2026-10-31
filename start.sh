@@ -305,14 +305,16 @@ preflight() {
         warn "nvidia-smi not found — skipping the GPU check"
     fi
 
-    local avail_gb
+    local avail_gb used_gb
     mkdir -p "$MODELS_DIR"
     avail_gb="$(df -BG --output=avail "$MODELS_DIR" 2>/dev/null | tail -1 | tr -dc '0-9' || true)"
     if [ -n "${avail_gb:-}" ] && [ "$avail_gb" -gt 0 ]; then
-        if [ "$avail_gb" -lt "$NEED_DISK_GB" ] && ! downloads_present; then
-            die "only ${avail_gb} GiB free at $MODELS_DIR, need ~${NEED_DISK_GB} GiB for the checkpoints — free space or set MODELS_DIR"
+        # What is already downloaded (a resumed download) counts toward the need.
+        used_gb="$(downloads_used)"
+        if [ "$((avail_gb + used_gb))" -lt "$NEED_DISK_GB" ] && ! downloads_present; then
+            die "only ${avail_gb} GiB free at $MODELS_DIR and ${used_gb} GiB already downloaded, need ~${NEED_DISK_GB} GiB for the checkpoints — free space or set MODELS_DIR"
         fi
-        log "  disk: ${avail_gb} GiB free at $MODELS_DIR"
+        log "  disk: ${avail_gb} GiB free at $MODELS_DIR, ${used_gb} GiB already downloaded (need ~${NEED_DISK_GB} GiB)"
     fi
 
     if [ "$check_port" = 1 ]; then
@@ -495,6 +497,7 @@ do_install() {
 # of the files its build writes. The same check decides for Docker Compose.
 model_present() { bash "$SCRIPT_DIR/docker/prepare.sh" check "$1" "$2"; }
 downloads_present() { model_present "$EXPORT_HOST" export && model_present "$OFFICIAL_HOST" official; }
+downloads_used() { bash "$SCRIPT_DIR/docker/prepare.sh" used "$EXPORT_HOST" "$OFFICIAL_HOST"; }
 models_present() { downloads_present && model_present "$HYBRID_HOST" hybrid; }
 
 # The three checkpoint mounts, read-only for the server.

@@ -230,9 +230,55 @@ def test_fetch_downloads_only_what_the_server_reads_at_the_pin(tmp_path):
     lines = [line for line in run.stdout.splitlines() if line.startswith('hf ')]
     assert lines == [
         f'hf download org/repo --revision rev1 --local-dir {target} --include config.json '
-        'model.safetensors.index.json quantization_config.json tokenizer.json tokenizer_config.json model-*.safetensors',
+        '--include model.safetensors.index.json --include quantization_config.json --include tokenizer.json '
+        '--include tokenizer_config.json --include model-*.safetensors',
         f'hf download org/base --revision rev2 --local-dir {target} --include config.json '
-        'model.safetensors.index.json model-*.safetensors']
+        '--include model.safetensors.index.json --include model-*.safetensors']
+
+
+# du as the host would count the two download directories (exported, so prepare.sh's own bash sees it).
+FAKE_DU = '''du() { case "$4" in *official*|*1017/) echo "400G	$4" ;; *) echo "200G	$4" ;; esac; }
+export -f du
+'''
+
+
+@pytest.mark.parametrize('avail,ok', [(100, True), (50, False)])
+def test_prepare_counts_every_downloaded_byte_toward_the_need(tmp_path, avail, ok):
+    """A resumed download needs only what is missing: a complete export and a partial official
+    checkpoint both count, with the free space, toward NEED_DISK_GB."""
+    export, official = tmp_path / 'export', tmp_path / 'official'
+    export.mkdir()
+    official.mkdir()
+    body = FAKE_DU + f'''EXPORT_DIR="{export}"; OFFICIAL_DIR="{official}"
+complete() {{ [ "$1" = "{export}" ]; }}
+fetch() {{ echo "fetch $1"; }}; hybrid() {{ :; }}
+df() {{ printf 'Avail\\n{avail}G\\n'; }}
+models
+'''
+    run = prepare_functions(body, NEED_DISK_GB='680')
+    assert (run.returncode == 0) is ok, run.stdout + run.stderr
+    if ok:
+        assert 'fetch official' in run.stdout and 'fetch export' not in run.stdout
+    else:
+        assert f'only {avail} GiB free under the model directory and 600 GiB already downloaded' in run.stderr
+
+
+@pytest.mark.parametrize('avail,ok', [(100, True), (50, False)])
+def test_start_counts_a_resumed_download_toward_the_need(tmp_path, avail, ok):
+    """start.sh's disk preflight counts what is already in MODELS_DIR as prepare.sh does, and says so."""
+    for host in HOSTS[:2]:
+        (tmp_path / 'store' / host).mkdir(parents=True)
+    body = FAKE_DU + f'''need_cmd() {{ :; }}; preflight_docker() {{ :; }}; nvidia-smi() {{ :; }}
+df() {{ printf 'Avail\\n{avail}G\\n'; }}
+preflight
+'''
+    run = run_start(tmp_path, body, MODELS_DIR='store', NEED_DISK_GB='680', BOOT_CHECK='0')
+    assert (run.returncode == 0) is ok, run.stdout + run.stderr
+    store = tmp_path / 'store'
+    if ok:
+        assert f'disk: {avail} GiB free at {store}, 600 GiB already downloaded (need ~680 GiB)' in run.stdout
+    else:
+        assert f'only {avail} GiB free at {store} and 600 GiB already downloaded, need ~680 GiB' in run.stderr
 
 
 def test_refresh_fetches_complete_downloads_again(tmp_path):

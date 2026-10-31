@@ -22,6 +22,8 @@
 #                                host too (./start.sh).
 #   prepare.sh required NAME     the files checkpoint NAME needs besides the
 #                                shards its index names.
+#   prepare.sh used DIR...       GiB the download directories DIR... already
+#                                hold; runs on the host too (./start.sh).
 #
 # The served checkpoint is a hybrid: the routed experts of the EXL3 export,
 # every other weight from DeepSeek's official FP8 checkpoint at its own
@@ -83,11 +85,11 @@ required() {
     esac
 }
 
-# The download patterns of each repository: what `required` and the index need.
+# The download patterns of each repository, one per line: what `required` and the index need.
 includes() {
     case "$1" in
-        export) echo config.json model.safetensors.index.json quantization_config.json tokenizer.json tokenizer_config.json 'model-*.safetensors' ;;
-        official) echo config.json model.safetensors.index.json 'model-*.safetensors' ;;
+        export) printf '%s\n' config.json model.safetensors.index.json quantization_config.json tokenizer.json tokenizer_config.json 'model-*.safetensors' ;;
+        official) printf '%s\n' config.json model.safetensors.index.json 'model-*.safetensors' ;;
     esac
 }
 
@@ -132,14 +134,30 @@ present() {
     [ "${REFRESH_WEIGHTS:-0}" != 1 ] && complete "$1" "$2"
 }
 
+# used_gb DIR...: GiB the download directories already hold, partial files
+# included: what a resumed download does not need again.
+used_gb() {
+    local dir gb total=0
+    for dir in "$@"; do
+        [ -d "$dir" ] || continue
+        gb="$(du -s -BG -- "$dir/" 2>/dev/null | cut -f1 | tr -dc '0-9' || true)"
+        total=$((total + ${gb:-0}))
+    done
+    echo "$total"
+}
+
 fetch() {
-    local name="$1" repo="$2" revision="$3" dir="$4" patterns
+    local name="$1" repo="$2" revision="$3" dir="$4" pattern
+    local -a include=()
     [ -x "$HF" ] || fail "no Hugging Face client at $HF"
     [ -w "$dir" ] || fail "$dir is not writable by uid $(id -u); give it to that user, or set HOST_UID and HOST_GID to its owner"
     say "downloading $repo @ $revision (resumes a partial download)"
-    patterns="$(includes "$name")"
-    # shellcheck disable=SC2086
-    "$HF" download "$repo" --revision "$revision" --local-dir "$dir" ${patterns:+--include $patterns}
+    # One --include per pattern: the client takes one value per flag and reads
+    # any further words as file names, which make it ignore --include.
+    while IFS= read -r pattern; do
+        include+=(--include "$pattern")
+    done < <(includes "$name")
+    "$HF" download "$repo" --revision "$revision" --local-dir "$dir" "${include[@]}"
     complete "$dir" "$name" || fail "$repo: the download ended but $dir is still incomplete; run the same command again to resume"
     say "$repo: complete"
 }
@@ -165,10 +183,9 @@ hybrid() {
 }
 
 models() {
-    local used=0 avail
+    local used avail
     if ! present "$EXPORT_DIR" export || ! present "$OFFICIAL_DIR" official; then
-        complete "$EXPORT_DIR" export || used=$((used + $(du -s -BG "$EXPORT_DIR" | cut -dG -f1)))
-        complete "$OFFICIAL_DIR" official || used=$((used + $(du -s -BG "$OFFICIAL_DIR" | cut -dG -f1)))
+        used="$(used_gb "$EXPORT_DIR" "$OFFICIAL_DIR")"
         avail="$(df -BG --output=avail "$OFFICIAL_DIR" | tail -1 | tr -dc '0-9')"
         if [ -n "$avail" ] && [ "$((avail + used))" -lt "$NEED_DISK_GB" ] \
             && ! { complete "$EXPORT_DIR" export && complete "$OFFICIAL_DIR" official; }; then
@@ -242,5 +259,6 @@ case "${1:-}" in
     serve) serve ;;
     check) [ "$#" = 3 ] || fail "usage: prepare.sh check DIR NAME"; complete "$2" "$3" ;;
     required) [ "$#" = 2 ] || fail "usage: prepare.sh required NAME"; required "$2" ;;
-    *) fail "usage: prepare.sh prepare | models | serve | check DIR NAME | required NAME" ;;
+    used) shift; used_gb "$@" ;;
+    *) fail "usage: prepare.sh prepare | models | serve | check DIR NAME | required NAME | used DIR..." ;;
 esac
