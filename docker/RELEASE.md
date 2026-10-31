@@ -3,8 +3,9 @@
 `build.sh` is rootless and CPU-only (`CUDA_VISIBLE_DEVICES=""`); Docker is not
 needed. Choose new, dedicated `STAGE` and `OUT` directories. Builds never
 publish. `CONSTRAINTS` is the complete installed dependency lock; the engine and
-the plugin are not installed in the venv (`PYTHONPATH` names their trees).
-Every installation uses it, and packaging rejects missing, extra or changed
+the plugin are installed in the venv from `/opt/assembly` without building them
+(`venv_entry.py`: `/opt/venv/bin/vllm`, vLLM's distribution, a `.pth` naming their
+trees). Every installation uses the lock, and packaging rejects missing, extra or changed
 distributions. Python is pinned to 3.12.14; the CUDA base, the upstream wheel and
 the three engine commits remain pinned by digest, sha256 and commit. Version
 constraints reproduce the installed dependency set; wheel-download hashes and a

@@ -9,9 +9,11 @@
 #             native-manifest.json, RELEASE_NATIVE_MANIFEST_SHA256) and its metadata
 #   assembly.json  the release's record of them (docker/assembly.json, checked against
 #             this build field by field)
-# beside Python in /opt/python and the dependency lock (CONSTRAINTS) in /opt/venv; the
-# image runs with PYTHONPATH=/opt/assembly/engine:/opt/assembly/plugin and the Env the
-# plugin's launcher declares. Needs Linux x86_64, git, curl, uv, GNU tar, pigz,
+# beside Python in /opt/python and the dependency lock (CONSTRAINTS) in /opt/venv, where
+# venv_entry.py installs the engine from its own files (/opt/venv/bin/vllm, vllm's
+# version and entry points, the engine and plugin on the venv's path; nothing built);
+# the image runs with PYTHONPATH=/opt/assembly/engine:/opt/assembly/plugin and the Env
+# the plugin's launcher declares. Needs Linux x86_64, git, curl, uv, GNU tar, pigz,
 # bubblewrap (the native build), a CUDA 13.x toolkit (the P2P probe) and, without
 # BASE_OCI, crane.
 # CLONE_FROM: a git repository to fetch the queue and plugin from instead of the public
@@ -150,7 +152,7 @@ build_tree() {
     "$UV" venv --relocatable --python "$STAGE/opt/python/bin/python$PYTHON_VERSION" "$STAGE/opt/venv"
 
     export VIRTUAL_ENV="$STAGE/opt/venv"
-    log "locked dependencies (the engine and the plugin are not installed: PYTHONPATH names them)"
+    log "locked dependencies (the engine and the plugin come from /opt/assembly, below)"
     "$UV" pip install "${PIP[@]}" -r "$CONSTRAINTS"
     "$UV" pip freeze > "$STAGE/opt/venv/requirements.lock.txt"
     unset VIRTUAL_ENV
@@ -179,6 +181,8 @@ LOCK
     install -m 0664 "$RECORD" "$tree/assembly.json"
     python3 "$HERE/assembly.py" files --opt "$STAGE/opt" --src "$SRC_GIT" --queue "$RELEASE_QUEUE_COMMIT" \
         --plugin "$RELEASE_PLUGIN_COMMIT" --out "$FILES"
+    log "the venv's engine install: /opt/venv/bin/vllm, vllm's distribution, the engine on the venv's path"
+    python3 "$HERE/venv_entry.py" "$STAGE/opt"
 
     log "verify imports (no GPU)"
     (cd /tmp && PYTHONPATH="$tree/engine:$tree/plugin" CUDA_VISIBLE_DEVICES= \

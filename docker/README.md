@@ -20,9 +20,12 @@ image, how to build it, and how to run it by hand with `docker run`.
   - `assembly.json`: the pins, the wheel and the natives' sha256.
 
   Python 3.12 is `/opt/python`; `/opt/venv` holds the dependency lock (torch
-  2.14.0, CUDA 13.0 build) and not the engine: `PYTHONPATH` names
-  `/opt/assembly/engine:/opt/assembly/plugin`. The installed package list is in
-  `/opt/venv/requirements.lock.txt`.
+  2.14.0, CUDA 13.0 build) and the engine installed from `/opt/assembly` without
+  building it: `/opt/venv/bin/vllm`, vLLM's version and entry points, and
+  `/opt/assembly/engine` and `/opt/assembly/plugin` on the venv's path, so
+  `/opt/venv/bin/python` imports vLLM with no `PYTHONPATH` ([`venv_entry.py`](venv_entry.py)).
+  The image's `PYTHONPATH` names the same two directories. The installed package
+  list is in `/opt/venv/requirements.lock.txt`.
 - **The release's launch:** `/opt/recipe/serve.sh`, generated from the
   settings this release was validated with: the engine command and every
   serving default, for the one layout (`LAYOUT=tp4`). The recipe runs it through
