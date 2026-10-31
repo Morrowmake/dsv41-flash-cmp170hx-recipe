@@ -67,7 +67,7 @@ CACHE=/cache
 CHECKOUT=/checkout
 HF=/opt/venv/bin/hf
 PY=/opt/venv/bin/python
-BUILDER=/opt/vllm-src/tools/sm80/build_hybrid_checkpoint.py
+BUILDER=/opt/assembly/plugin/tools/sm80/build_hybrid_checkpoint.py
 
 say() { printf 'prepare: %s\n' "$*"; }
 fail() { printf 'prepare: %s\n' "$*" >&2; exit 1; }
