@@ -9,11 +9,19 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 ROOT = Path(__file__).parents[2]
+# The model's files start.sh sources beside its own (recipe.toml [launch] mounted).
+MOUNTED = tomllib.loads((ROOT / 'recipe.toml').read_text())['launch']['mounted']
+
+
+def stage_mounted(root):
+    for name in MOUNTED:
+        (root / name).write_text((ROOT / name).read_text())
 spec = importlib.util.spec_from_file_location('boot_check', ROOT / 'boot_check.py')
 boot = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boot)
@@ -65,10 +73,12 @@ def endpoint(mode='ok'):
                 self.wfile.write(json.dumps(dict(choices=[dict(message=dict(content=answer))])).encode())
             else:
                 data = dict(error='fixture') if mode == 'stream-error' else dict(choices=[dict(delta=dict(content='code'))])
+                # The counters move before the client can read [DONE]: set after the writes, the client's next
+                # /metrics read raced this thread (test_delayed_counters_without_extra_generation saw 4 reads, not 5).
+                state['ready'] = True
                 self.wfile.write(b'data: ' + json.dumps(data).encode() + b'\n\n')
                 if mode != 'incomplete':
                     self.wfile.write(b'data: [DONE]\n\n')
-                state['ready'] = True
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -153,7 +163,7 @@ def test_invalid_metrics(value):
 
 def test_start_owns_check_once_and_stops_on_failure(tmp_path):
     (tmp_path/'.env.example').write_text('')
-    (tmp_path/'engram_placement.sh').write_text((ROOT/'engram_placement.sh').read_text())
+    stage_mounted(tmp_path)
     source = (ROOT/'start.sh').read_text().rsplit('main "$@"', 1)[0]
     script = tmp_path/'start.sh'
     script.write_text(source + '''
@@ -190,7 +200,7 @@ def test_one_failed_liveness_query_does_not_stop_the_launch(tmp_path):
     # A single failed ownership check (docker returned nothing) while the
     # server loads is retried; two in a row mean the server is gone.
     (tmp_path/'.env.example').write_text('')
-    (tmp_path/'engram_placement.sh').write_text((ROOT/'engram_placement.sh').read_text())
+    stage_mounted(tmp_path)
     source = (ROOT/'start.sh').read_text().rsplit('main "$@"', 1)[0]
     queries = tmp_path/'queries'
     record = tmp_path/'stop'
@@ -238,6 +248,7 @@ def test_supervisor_failure_cleans_owned_child(tmp_path):
 
 
 def test_supervisor_success_and_signal_cleanup(tmp_path):
+    """A stop after a passing check (docker stop, docker compose down) shuts the server down and is no failure."""
     pidfile = tmp_path/'pid'
     childcode = 'import os,time,pathlib;pathlib.Path(' + repr(str(pidfile)) + ').write_text(str(os.getpid()));time.sleep(120)'
     with endpoint() as (client, state):
@@ -248,15 +259,45 @@ def test_supervisor_success_and_signal_cleanup(tmp_path):
             assert 'enabled' in proc.stdout.readline()
             assert 'PASS' in proc.stdout.readline()
             deadline = time.monotonic() + 5
-            while not pidfile.exists() and time.monotonic() < deadline:
+            while not (pidfile.exists() and pidfile.read_text()) and time.monotonic() < deadline:
                 time.sleep(0.01)
-            assert pidfile.exists()
+            assert pidfile.read_text()   # write_text creates the file before its pid is in it
             proc.send_signal(signal.SIGTERM)
-            assert proc.wait(timeout=10) == 1
+            rest = proc.stdout.read()
+            assert proc.wait(timeout=10) == 0
+            assert '[boot-check] stopped by SIGTERM: the server was shut down after a passing check' in rest, rest
+            assert 'FAIL' not in rest, rest
         finally:
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pidfile.read_text()), 0)
+
+
+def test_supervisor_stopped_before_the_check_finishes(tmp_path):
+    """A stop while the server is still starting ends the launch with the signal's status, not a check failure."""
+    pidfile = tmp_path/'pid'
+    childcode = 'import os,time,pathlib;pathlib.Path(' + repr(str(pidfile)) + ').write_text(str(os.getpid()));time.sleep(120)'
+    with endpoint() as (client, state):
+        base = client.base
+    proc = subprocess.Popen([sys.executable, '-u', str(ROOT/'boot_check.py'), '--base', base,
+                             '--model', 'fixture', '--serve', sys.executable, '-c', childcode],
+                            env=dict(os.environ, CUDA_VISIBLE_DEVICES=''), stdout=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 5
+        while not (pidfile.exists() and pidfile.read_text()) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pidfile.read_text()   # write_text creates the file before its pid is in it
+        proc.send_signal(signal.SIGTERM)
+        out = proc.stdout.read()
+        assert proc.wait(timeout=30) == 128 + signal.SIGTERM
+        assert '[boot-check] stopped by SIGTERM before the check finished' in out, out
+        assert 'FAIL' not in out and 'PASS' not in out, out
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
     with pytest.raises(ProcessLookupError):
         os.kill(int(pidfile.read_text()), 0)
 
@@ -301,7 +342,7 @@ def test_boot_log_ignores_previous_launch(tmp_path):
 
 def test_start_stops_log_failure_before_health(tmp_path):
     (tmp_path / '.env.example').write_text('')
-    (tmp_path / 'engram_placement.sh').write_text((ROOT / 'engram_placement.sh').read_text())
+    stage_mounted(tmp_path)
     log = tmp_path / 'serve.log'
     log.write_text('[p2p] P2P enabled: content check passed\n'
                    'Custom all-reduce flags-in-data path requested '

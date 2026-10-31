@@ -47,8 +47,13 @@ PATH_KEYS = {
 }
 # Base-image metadata the container runtime puts in every environment.
 IMAGE_PREFIXES = ("NV_", "NVIDIA_", "CUDA_VERSION", "NCCL_VERSION", "NVARCH")
-# Engine switch getters: upstream's table and the fork's own switches.
+# Engine switch getters: upstream's table and the fork's own switches. A single-tree engine (start.sh
+# RELEASE_VLLM_COMMIT) holds both at its commit; an assembled engine (the four pins RELEASE_UPSTREAM_COMMIT,
+# RELEASE_QUEUE_COMMIT, RELEASE_PLUGIN_COMMIT, RELEASE_NATIVE_BUILD) holds upstream's in its queue commit and the
+# fork's in its plugin commit (vllm_sm80/envs.py). Both commits are in the fork repository.
 ENV_FILES = ("vllm/envs.py", "vllm/sm80/envs.py")
+PINNED_ENV_FILES = (("vllm/envs.py", "RELEASE_QUEUE_COMMIT"), ("vllm_sm80/envs.py", "RELEASE_PLUGIN_COMMIT"))
+ENGINE_PINS = ("RELEASE_UPSTREAM_COMMIT", "RELEASE_QUEUE_COMMIT", "RELEASE_PLUGIN_COMMIT", "RELEASE_NATIVE_BUILD")
 # Command arguments that name a location, not a behaviour.
 IGNORED_ARGS = {"model", "model_tag", "host", "port", "enable_prompt_tokens_details"}
 PATH_OVERRIDES = {"engram_table_dir"}
@@ -62,16 +67,47 @@ RECIPE_KEYS = {
     "PYTHONDONTWRITEBYTECODE": "the container writes no bytecode into its read-only engine tree",
 }
 # Where the image holds the engine tree; a validation leg runs it from its own
-# checkout, named by its PYTHONPATH.
+# checkout, named by its PYTHONPATH. An assembled engine's image holds engine and
+# plugin side by side (imagebuild/sm80/build.py assembly), as the leg's PYTHONPATH
+# names its engine:plugin.
 IMAGE_TREE = "/opt/vllm-src"
+IMAGE_ASSEMBLY = ("/opt/assembly/engine", "/opt/assembly/plugin")
+COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
-def release_pin(root=ROOT):
-    match = re.search(r"^RELEASE_VLLM_COMMIT=[\"']?([^\"'\n]+)", (root / "start.sh").read_text(), re.M)
-    pin = match[1] if match else ""
-    if not re.fullmatch(r"[0-9a-f]{40}", pin):
+def release_engine(root=ROOT):
+    """The engine the recipe releases, from its start.sh pins: {label, sources: [(getter file, commit)], image: the
+    image's code directories}. A single-tree engine names RELEASE_VLLM_COMMIT; an assembled one the four ENGINE_PINS
+    and no RELEASE_VLLM_COMMIT. ValueError when start.sh names neither form completely."""
+    text = (root / "start.sh").read_text()
+    pins = {m[1]: m[2] for m in re.finditer(r"^(RELEASE_[A-Z_]+)=[\"']?([^\"'\n]*)", text, re.M)}
+    named = [n for n in ENGINE_PINS if n in pins]
+    if named:
+        if len(named) != len(ENGINE_PINS) or "RELEASE_VLLM_COMMIT" in pins:
+            raise ValueError("start.sh names %s: an assembled engine names all of %s and no RELEASE_VLLM_COMMIT"
+                             % (", ".join(sorted(set(named) | {"RELEASE_VLLM_COMMIT"} & set(pins))),
+                                ", ".join(ENGINE_PINS)))
+        bad = [n for n in ENGINE_PINS[:3] if not COMMIT.fullmatch(pins[n])]
+        if bad:
+            raise ValueError("start.sh %s must be full commits" % ", ".join(bad))
+        return {"label": "queue %s, plugin %s" % (pins["RELEASE_QUEUE_COMMIT"][:10],
+                                                  pins["RELEASE_PLUGIN_COMMIT"][:10]),
+                "sources": [(name, pins[pin]) for name, pin in PINNED_ENV_FILES], "image": IMAGE_ASSEMBLY}
+    pin = pins.get("RELEASE_VLLM_COMMIT", "")
+    if not COMMIT.fullmatch(pin):
         raise ValueError("start.sh carries no release pin yet (tools/set-pin.sh sets it)")
-    return pin
+    return {"label": pin, "sources": [(name, pin) for name in ENV_FILES], "image": (IMAGE_TREE,)}
+
+
+def engine_getters(fork, engine):
+    """{name: (getter file, its source, getter)} of the released ENGINE (release_engine) in the FORK repository; a
+    later file's getter wins (the fork's over upstream's)."""
+    getters = {}
+    for filename, commit in engine["sources"]:
+        source = git_source(fork, filename, commit)
+        for key, getter in read_getters(source).items():
+            getters[key] = (filename, source, getter)
+    return getters
 
 
 def git_source(fork, name, pin):
@@ -215,7 +251,10 @@ def compare_commands(actual, expected):
     return failures
 
 
-def compare_environment(actual, expected, getters, pin):
+def compare_environment(actual, expected, getters, engine):
+    """The environment mismatches of the recipe's launch (ACTUAL) against a validation leg's (EXPECTED), with the
+    released ENGINE (release_engine) and its GETTERS (engine_getters)."""
+    at = dict(engine["sources"])
     failures, matched, allowed = [], 0, 0
     for key in sorted(set(actual) | set(expected)):
         if key in actual and key in expected and actual[key] == expected[key]:
@@ -229,8 +268,9 @@ def compare_environment(actual, expected, getters, pin):
             reason = "base-image metadata"
         elif key in RECIPE_KEYS and key not in expected:
             reason = RECIPE_KEYS[key]
-        elif key in actual and key in expected and same_tree_file(actual[key], expected[key], expected):
-            reason = f"the same engine-tree file, {actual[key].removeprefix(IMAGE_TREE + '/')}"
+        elif key in actual and key in expected and same_tree_file(actual[key], expected[key], expected,
+                                                                  engine["image"]):
+            reason = f"the same engine file, {actual[key]}"
         # A name on one side only can be equivalent only through the pinned fork getter.
         if reason is None and ((key in actual) != (key in expected)) and key in getters:
             value = actual[key] if key in actual else expected[key]
@@ -239,7 +279,7 @@ def compare_environment(actual, expected, getters, pin):
             if equal:
                 expression = " ".join(ast.get_source_segment(source, getter).split())
                 reason = (f"explicit {value!r} equals fork default {default!r}; "
-                          f"{filename}:{getter.lineno} at {pin[:10]}: {expression}")
+                          f"{filename}:{getter.lineno} at {at[filename][:10]}: {expression}")
         if reason is not None:
             print(f"environment: allowed {key} ({reason})")
             allowed += 1
@@ -249,28 +289,28 @@ def compare_environment(actual, expected, getters, pin):
     return failures
 
 
-def same_tree_file(mine, theirs, expected):
-    """The image tree's file and the same file in the validation leg's tree (its PYTHONPATH)."""
-    tree = expected.get("PYTHONPATH", "").rstrip("/")
-    if not tree.startswith("/") or ":" in tree or not mine.startswith(IMAGE_TREE + "/"):
+def same_tree_file(mine, theirs, expected, image):
+    """The image's file MINE and the same file THEIRS of the validation leg's engine: IMAGE's code directories (the
+    engine tree; an assembled engine's engine and plugin) and the leg's PYTHONPATH entries, one for one."""
+    trees = [t.rstrip("/") for t in expected.get("PYTHONPATH", "").split(":")]
+    if len(trees) != len(image) or not all(t.startswith("/") for t in trees):
         return False
-    return theirs.startswith(tree + "/") and mine[len(IMAGE_TREE):] == theirs[len(tree):]
+    for place, tree in zip(image, trees):
+        if mine.startswith(place + "/"):
+            return theirs.startswith(tree + "/") and mine[len(place):] == theirs[len(tree):]
+    return False
 
 
 def check_effective(root, path, layout, fork, serve_log=None, serve=None):
     expected = json.loads(path.read_text())
     if not isinstance(expected, dict) or not all(isinstance(v, str) for v in expected.values()):
         raise ValueError("effective environment must be a complete string-valued JSON object")
-    pin = release_pin(root)
-    getters = {}
-    for filename in ENV_FILES:
-        source = git_source(fork, filename, pin)
-        for key, getter in read_getters(source).items():
-            getters[key] = (filename, source, getter)
+    engine = release_engine(root)
+    getters = engine_getters(fork, engine)
     actual, command, _ = dry_run(root, layout, serve)
     logged = log_command(serve_log or path.with_name("serve.log"))
-    print(f"Full environment: layout={layout}; DRY=1; fork={pin}")
-    failures = compare_environment(actual, expected, getters, pin)
+    print(f"Full environment: layout={layout}; DRY=1; fork={engine['label']}")
+    failures = compare_environment(actual, expected, getters, engine)
     command_failures = compare_commands(command, logged)
     print(f"command: {len(command_failures)} mismatches")
     failures.extend(command_failures)

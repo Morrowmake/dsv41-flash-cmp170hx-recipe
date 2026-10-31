@@ -17,6 +17,9 @@
 #   4. serve    serve.sh, under the two-request boot check (boot_check.py)
 #               unless BOOT_CHECK=0 or start.sh runs that check itself
 #
+# EXTRA_ARGS may not set an argument the release fixes (extra_args_guard);
+# with speculative decoding off in it, the boot check reads no draft counters.
+#
 # DRY=1 checks nothing on the cards and lets serve.sh print the environment
 # and the command instead of starting the server.
 set -euo pipefail
@@ -25,10 +28,81 @@ REPO_ROOT="${RECIPE_DIR:-/recipe}"
 VENV="${VENV:-/opt/venv}"
 SERVE_SH="${SERVE_SH:-/opt/recipe/serve.sh}"
 [ -f "$SERVE_SH" ] || { echo "entry.sh: this image has no $SERVE_SH" >&2; exit 1; }
-# One layout: tensor-parallel 4 over the four cards.
+# One layout: tensor-parallel 4, routed experts split across the cards.
 export LAYOUT="${LAYOUT:-tp4}"
 TP=4
 PP=1
+
+# Speculative decoding switched off through EXTRA_ARGS
+# (`--speculative-config None`, `null` or `off`, also written with `=`).
+# Without the drafter the adaptive verify depth has no state to work on and
+# the server stops while capturing its CUDA graphs, and the boot check has no
+# draft counters to read. drafting_off returns 0 when drafting is off; the
+# entry and start.sh then clear VLLM_DSPARK_ADAPTIVE_DEPTH and run the boot
+# check without its draft-counter checks.
+drafting_off() {
+    local -a args
+    local i value
+    read -ra args <<< "${EXTRA_ARGS:-}"
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        case "${args[i]}" in
+            --speculative-config=*) value="${args[i]#*=}" ;;
+            --speculative-config) value="${args[i+1]:-}" ;;
+            *) continue ;;
+        esac
+        case "${value,,}" in none|null|off|''|\'\'|'""') return 0 ;; esac
+    done
+    return 1
+}
+DRAFTING_OFF_LINE="Speculative decoding: off (EXTRA_ARGS); VLLM_DSPARK_ADAPTIVE_DEPTH cleared, boot check without draft counters"
+# With drafting off, the settings that only the drafter reads are cleared.
+drafting_off_clear() {
+    export VLLM_DSPARK_ADAPTIVE_DEPTH=
+}
+
+# EXTRA_ARGS adds options to the server's command line. It may not set an
+# argument this release fixes (the checkpoint, the parallel layout, the
+# quantisation, the memory budget and the KV cache): extra_args_guard prints
+# the first such argument and returns 2. The engine's parser accepts a unique
+# prefix of a long option, `_` for `-`, `--no-` before a switch and dotted
+# JSON keys, so each of those is matched too; so are the short aliases.
+# Switching speculative decoding off (drafting_off's forms) is always allowed.
+EXTRA_ARGS_CONTROLLED="config model hf-config-path hf-overrides model-class-overrides tensor-parallel-size pipeline-parallel-size data-parallel-size data-parallel-size-local decode-context-parallel-size prefill-context-parallel-size gpu-memory-utilization device-memory-utilization kv-cache-memory-bytes num-gpu-blocks-override quantization quantization-config kv-cache-dtype kv-cache-dtype-skip-layers mamba-cache-dtype mamba-ssm-cache-dtype cpu-offload-gb cpu-offload-params offload-backend offload-group-size offload-num-in-group offload-prefetch-step offload-params kv-offloading-size kv-offloading-backend kv-transfer-config"
+EXTRA_ARGS_CONTROLLED_SHORT="-q -pp -tp -dcp -pcp -dp -dpl"
+extra_args_guard() {
+    local -a args
+    local i arg option controlled
+    read -ra args <<< "${EXTRA_ARGS:-}"
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        arg="${args[i]}"
+        case "$arg" in
+            --speculative-config=*)
+                case "${arg#*=}" in [Nn][Oo][Nn][Ee]|[Nn][Uu][Ll][Ll]|[Oo][Ff][Ff]|''|\'\'|'""') continue ;; esac ;;
+            --speculative-config)
+                case "${args[i+1]:-}" in [Nn][Oo][Nn][Ee]|[Nn][Uu][Ll][Ll]|[Oo][Ff][Ff]|''|\'\'|'""') i=$((i + 1)); continue ;; esac ;;
+        esac
+        case "$arg" in
+            --)
+                echo "EXTRA_ARGS cannot end the options with --: $arg" >&2; return 2 ;;
+            --*)
+                option="${arg%%=*}"; option="${option%%.*}"; option="${option//_/-}"; option="${option#--}"
+                for controlled in $EXTRA_ARGS_CONTROLLED; do
+                    if [[ "$controlled" == "$option"* || "no-$controlled" == "$option"* ]]; then
+                        echo "EXTRA_ARGS cannot set --$controlled, which this release fixes: $arg" >&2; return 2
+                    fi
+                done ;;
+            -?*)
+                option="${arg%%=*}"; option="${option%%.*}"
+                for controlled in $EXTRA_ARGS_CONTROLLED_SHORT; do
+                    if [[ "$option" == "$controlled"* || "$controlled" == "$option"* ]]; then
+                        echo "EXTRA_ARGS cannot set $controlled, which this release fixes: $arg" >&2; return 2
+                    fi
+                done ;;
+        esac
+    done
+    return 0
+}
+extra_args_guard || exit 2
 
 # 1. Caches. The server runs as the user who started it; everything it writes
 # goes under /cache, which that user owns. Compilers use a private temporary
@@ -92,7 +166,7 @@ if [ "$ENGRAM_PLACEMENT" = ssd ]; then
 fi
 echo "$ENGRAM_LINE"
 if drafting_off; then
-    export VLLM_DSPARK_ADAPTIVE_DEPTH=
+    drafting_off_clear
     echo "$DRAFTING_OFF_LINE"
 fi
 

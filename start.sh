@@ -6,7 +6,7 @@
 # We serve DeepSeek-V4.1-Flash-1017 on four GPUs with a patched vLLM: OpenAI
 # API on 127.0.0.1:8000 as "dsv41-flash" (local only unless you set HOST; no
 # API key unless you set API_KEY), DSpark speculative decoding, 262,144-token
-# context, tensor-parallel 4 with whole routed experts per card. The weights
+# context, tensor-parallel 4 with routed experts split across cards. The weights
 # are a hybrid: the routed experts from the EXL3 2.9 bpw export, every other
 # weight from DeepSeek's official FP8 checkpoint. The Engram tables (~189 GiB;
 # the server takes 202-204 GiB of host RAM in all) are held in host RAM when
@@ -143,7 +143,10 @@ load_env_defaults "$SCRIPT_DIR/.env"
 # Both are filled in at release (tools/set-pin.sh moves the commit pin
 # everywhere at once). The commit pin is read by the release tools, not here.
 # shellcheck disable=SC2034
-RELEASE_VLLM_COMMIT=a0c57b52376efd67c57735bc949d4bafa22ae29e
+RELEASE_UPSTREAM_COMMIT=330c5bffeeb48725c0502a351e8ead2b54bd81eb
+RELEASE_QUEUE_COMMIT=0af5991c009e0c3ff4181f026a8e7dffe1370b45
+RELEASE_PLUGIN_COMMIT=0b34823c39ba0fd5c0d4690887882b4cfa69034e
+RELEASE_NATIVE_BUILD=native-6a7c62b43c-t2.14.0
 RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:f67d9be47ffbd4a8b84c77fe76bdb3f842187d9b2786fff573e390ae5361bfb0
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 # Where the checkpoints are: MODELS_DIR (a relative path is taken from this
@@ -167,7 +170,7 @@ HYBRID_MOUNT=/models/DeepSeek-V4.1-Flash-1017-hybrid-exl3-fp8
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-dsv41-flash}"
-# One layout: tp4 (tensor-parallel 4, whole routed experts per card).
+# One layout: tp4 (tensor-parallel 4, routed experts split across the cards).
 LAYOUT="${LAYOUT:-tp4}"
 [ "$LAYOUT" = tp4 ] || die "LAYOUT must be tp4, not '$LAYOUT'"
 PP=1; TP=4
@@ -313,7 +316,7 @@ preflight() {
     fi
 
     if [ "$check_port" = 1 ]; then
-        preflight_ram
+        preflight_launch
         if ! port_busy; then
             log "  port $PORT: free"
         elif server_is_ours; then
@@ -324,6 +327,84 @@ preflight() {
             die "port $PORT is already taken by another process. Set PORT to a free one, or stop whatever holds it."
         fi
     fi
+}
+
+# Speculative decoding switched off through EXTRA_ARGS
+# (`--speculative-config None`, `null` or `off`, also written with `=`).
+# Without the drafter the adaptive verify depth has no state to work on and
+# the server stops while capturing its CUDA graphs, and the boot check has no
+# draft counters to read. drafting_off returns 0 when drafting is off; the
+# entry and start.sh then clear VLLM_DSPARK_ADAPTIVE_DEPTH and run the boot
+# check without its draft-counter checks.
+drafting_off() {
+    local -a args
+    local i value
+    read -ra args <<< "${EXTRA_ARGS:-}"
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        case "${args[i]}" in
+            --speculative-config=*) value="${args[i]#*=}" ;;
+            --speculative-config) value="${args[i+1]:-}" ;;
+            *) continue ;;
+        esac
+        case "${value,,}" in none|null|off|''|\'\'|'""') return 0 ;; esac
+    done
+    return 1
+}
+DRAFTING_OFF_LINE="Speculative decoding: off (EXTRA_ARGS); VLLM_DSPARK_ADAPTIVE_DEPTH cleared, boot check without draft counters"
+# With drafting off, the settings that only the drafter reads are cleared.
+drafting_off_clear() {
+    export VLLM_DSPARK_ADAPTIVE_DEPTH=
+}
+
+# EXTRA_ARGS adds options to the server's command line. It may not set an
+# argument this release fixes (the checkpoint, the parallel layout, the
+# quantisation, the memory budget and the KV cache): extra_args_guard prints
+# the first such argument and returns 2. The engine's parser accepts a unique
+# prefix of a long option, `_` for `-`, `--no-` before a switch and dotted
+# JSON keys, so each of those is matched too; so are the short aliases.
+# Switching speculative decoding off (drafting_off's forms) is always allowed.
+EXTRA_ARGS_CONTROLLED="config model hf-config-path hf-overrides model-class-overrides tensor-parallel-size pipeline-parallel-size data-parallel-size data-parallel-size-local decode-context-parallel-size prefill-context-parallel-size gpu-memory-utilization device-memory-utilization kv-cache-memory-bytes num-gpu-blocks-override quantization quantization-config kv-cache-dtype kv-cache-dtype-skip-layers mamba-cache-dtype mamba-ssm-cache-dtype cpu-offload-gb cpu-offload-params offload-backend offload-group-size offload-num-in-group offload-prefetch-step offload-params kv-offloading-size kv-offloading-backend kv-transfer-config"
+EXTRA_ARGS_CONTROLLED_SHORT="-q -pp -tp -dcp -pcp -dp -dpl"
+extra_args_guard() {
+    local -a args
+    local i arg option controlled
+    read -ra args <<< "${EXTRA_ARGS:-}"
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        arg="${args[i]}"
+        case "$arg" in
+            --speculative-config=*)
+                case "${arg#*=}" in [Nn][Oo][Nn][Ee]|[Nn][Uu][Ll][Ll]|[Oo][Ff][Ff]|''|\'\'|'""') continue ;; esac ;;
+            --speculative-config)
+                case "${args[i+1]:-}" in [Nn][Oo][Nn][Ee]|[Nn][Uu][Ll][Ll]|[Oo][Ff][Ff]|''|\'\'|'""') i=$((i + 1)); continue ;; esac ;;
+        esac
+        case "$arg" in
+            --)
+                echo "EXTRA_ARGS cannot end the options with --: $arg" >&2; return 2 ;;
+            --*)
+                option="${arg%%=*}"; option="${option%%.*}"; option="${option//_/-}"; option="${option#--}"
+                for controlled in $EXTRA_ARGS_CONTROLLED; do
+                    if [[ "$controlled" == "$option"* || "no-$controlled" == "$option"* ]]; then
+                        echo "EXTRA_ARGS cannot set --$controlled, which this release fixes: $arg" >&2; return 2
+                    fi
+                done ;;
+            -?*)
+                option="${arg%%=*}"; option="${option%%.*}"
+                for controlled in $EXTRA_ARGS_CONTROLLED_SHORT; do
+                    if [[ "$option" == "$controlled"* || "$controlled" == "$option"* ]]; then
+                        echo "EXTRA_ARGS cannot set $controlled, which this release fixes: $arg" >&2; return 2
+                    fi
+                done ;;
+        esac
+    done
+    return 0
+}
+
+# The launch settings, checked before anything starts: EXTRA_ARGS may not set
+# an argument the release controls, and the start says when it turns
+# speculative decoding off.
+preflight_launch() {
+    extra_args_guard || exit 1
+    preflight_ram
 }
 
 # Where the Engram tables go, from the host memory available. Read only: the
@@ -420,7 +501,8 @@ models_present() { downloads_present && model_present "$HYBRID_HOST" hybrid; }
 model_mounts() {
     local mode="$1"
     printf '%s\n' -v "$EXPORT_HOST:$EXPORT_MOUNT:$mode" \
-        -v "$OFFICIAL_HOST:$OFFICIAL_MOUNT:$mode" -v "$HYBRID_HOST:$HYBRID_MOUNT:$mode"
+        -v "$OFFICIAL_HOST:$OFFICIAL_MOUNT:$mode" \
+        -v "$HYBRID_HOST:$HYBRID_MOUNT:$mode"
 }
 
 # With the hf client and the hybrid builder in the engine image, run as this
@@ -487,8 +569,8 @@ publish_addr() {
 
 # The environment of the container's entry (docker/entry.sh) and the image's
 # serve.sh: the in-container location, then every setting of yours they read.
-CONTAINER_KEYS="P2P P2P_PREBUILT P2P_CHECK_CACHE CUDA_VISIBLE_DEVICES MAX_SEQS MAX_BATCHED EXTRA_ARGS
-SERVED_MODEL_NAME API_KEY NEED_RAM_GIB"
+CONTAINER_KEYS="P2P P2P_PREBUILT P2P_CHECK_CACHE CUDA_VISIBLE_DEVICES API_KEY EXTRA_ARGS MAX_BATCHED
+MAX_SEQS SERVED_MODEL_NAME NEED_RAM_GIB"
 
 container_env() {
     local k
@@ -522,9 +604,9 @@ container_env() {
     for k in $CONTAINER_KEYS; do
         [ -n "${!k+x}" ] && printf '%s=%s\n' "$k" "${!k}"
     done
-    # Speculative decoding off in EXTRA_ARGS: the adaptive depth goes too
-    # (engram_placement.sh, drafting_off).
-    ! drafting_off || export VLLM_DSPARK_ADAPTIVE_DEPTH=
+    # Speculative decoding off in EXTRA_ARGS: the settings only the drafter
+    # reads go too (drafting_off_clear).
+    ! drafting_off || drafting_off_clear
     env | LC_ALL=C sort | grep -E '^(VLLM_|NCCL_|PYTORCH_CUDA_ALLOC_CONF=)' \
         | grep -vE '^VLLM_(COMMIT|REPO|BRANCH|SRC|USE_PRECOMPILED|PRECOMPILED_[A-Z_]*|API_KEY|IMAGE_CACHE_SEED)=' || true
 }

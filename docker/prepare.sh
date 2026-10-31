@@ -76,11 +76,9 @@ fail() { printf 'prepare: %s\n' "$*" >&2; exit 1; }
 # names. The server reads every one of them.
 required() {
     case "$1" in
-        export) echo config.json model.safetensors.index.json quantization_config.json \
-                    tokenizer.json tokenizer_config.json ;;
+        export) echo config.json model.safetensors.index.json quantization_config.json tokenizer.json tokenizer_config.json ;;
         official) echo config.json model.safetensors.index.json ;;
-        hybrid) echo config.json model.safetensors.index.json quantization_config.json \
-                    tokenizer.json tokenizer_config.json hybrid-build.json ;;
+        hybrid) echo config.json model.safetensors.index.json quantization_config.json tokenizer.json tokenizer_config.json hybrid-build.json ;;
         *) return 1 ;;
     esac
 }
@@ -88,14 +86,15 @@ required() {
 # The download patterns of each repository: what `required` and the index need.
 includes() {
     case "$1" in
-        export) echo config.json model.safetensors.index.json quantization_config.json \
-                    tokenizer.json tokenizer_config.json 'model-*.safetensors' ;;
+        export) echo config.json model.safetensors.index.json quantization_config.json tokenizer.json tokenizer_config.json 'model-*.safetensors' ;;
         official) echo config.json model.safetensors.index.json 'model-*.safetensors' ;;
     esac
 }
 
-# shards DIR: every shard file the index names.
+# shards DIR: every shard file the index names (none for a checkpoint of one
+# file without an index).
 shards() {
+    [ -f "$1/model.safetensors.index.json" ] || return 0
     grep -o '"[^"]*\.safetensors"' "$1/model.safetensors.index.json" | tr -d '"' | sort -u
 }
 
@@ -134,12 +133,13 @@ present() {
 }
 
 fetch() {
-    local name="$1" repo="$2" revision="$3" dir="$4"
+    local name="$1" repo="$2" revision="$3" dir="$4" patterns
     [ -x "$HF" ] || fail "no Hugging Face client at $HF"
     [ -w "$dir" ] || fail "$dir is not writable by uid $(id -u); give it to that user, or set HOST_UID and HOST_GID to its owner"
     say "downloading $repo @ $revision (resumes a partial download)"
-    # shellcheck disable=SC2046
-    "$HF" download "$repo" --revision "$revision" --local-dir "$dir" --include $(includes "$name")
+    patterns="$(includes "$name")"
+    # shellcheck disable=SC2086
+    "$HF" download "$repo" --revision "$revision" --local-dir "$dir" ${patterns:+--include $patterns}
     complete "$dir" "$name" || fail "$repo: the download ended but $dir is still incomplete; run the same command again to resume"
     say "$repo: complete"
 }

@@ -31,6 +31,16 @@ class CheckError(RuntimeError):
     pass
 
 
+class Stopped(BaseException):
+    """A stop request (SIGTERM or SIGINT: docker stop, docker compose down, Ctrl-C) to the supervisor, not a failed
+    check. A BaseException, so no handler of request errors swallows it."""
+
+    def __init__(self, signum, checked):
+        super().__init__(signal.Signals(signum).name)
+        self.signum = signum
+        self.checked = checked
+
+
 def banner(message):
     print('[boot-check] ' + message, flush=True)
 
@@ -224,8 +234,10 @@ def supervise(client, command, ready_timeout, container=False):
     reader.start()
     log_check = lambda: check_log(log.name, container)
 
+    state = {'checked': False}
+
     def interrupted(signum, frame):
-        raise CheckError('server supervisor interrupted')
+        raise Stopped(signum, state['checked'])
 
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
@@ -241,6 +253,7 @@ def supervise(client, command, ready_timeout, container=False):
         with client.open('/health', timeout=5):
             pass
         check(client, log_check=log_check)
+        state['checked'] = True
         client.ready_deadline = None
         client.ready_guard = None
         return child.wait()
@@ -296,6 +309,14 @@ def main():
                 pass
         check(client, log_check=log_check)
         return 0
+    except Stopped as stop:
+        # A requested stop is not a failure: after a passing check the server was shut down as asked (exit 0);
+        # before it, the check did not finish and the exit status is the signal's.
+        if stop.checked:
+            banner(f'stopped by {stop}: the server was shut down after a passing check')
+            return 0
+        banner(f'stopped by {stop} before the check finished')
+        return 128 + stop.signum
     except Exception as error:
         # HTTP errors must not echo request headers or credentials.
         banner('FAIL: ' + (str(error) if isinstance(error, CheckError) else type(error).__name__))

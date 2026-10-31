@@ -102,7 +102,6 @@ def inside(model, draft=None):
     checks.append("serve_import")
     engine = AsyncEngineArgs(model=str(model), load_format="exl3",
                              max_model_len=262144, tensor_parallel_size=4,
-                             enable_expert_parallel=True,
                              gpu_memory_utilization=0.95, kv_cache_dtype="bfloat16",
                              speculative_config=dict(SPECULATIVE))
     # EXL3 checks for the CUDA platform while the model config is built; on
@@ -126,7 +125,7 @@ def inside(model, draft=None):
         ServeSubcommand().subparser_init(parser.add_subparsers(dest="command"))
         args = parser.parse_args([
             "serve", str(model), "--load-format", "exl3", "--tensor-parallel-size", "4",
-            "--enable-expert-parallel", "--mm-encoder-tp-mode", "data",
+            "--mm-encoder-tp-mode", "data",
             "--kv-cache-dtype", "bfloat16",
             "--max-model-len", "262144", "--gpu-memory-utilization", "0.95",
             "--enable-auto-tool-choice", "--tool-call-parser", "deepseek_v41",
