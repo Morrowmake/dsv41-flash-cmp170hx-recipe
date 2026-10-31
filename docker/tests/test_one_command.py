@@ -78,13 +78,14 @@ def test_compose_runs_the_start_container_after_prepare():
 
 
 def test_image_and_launch_name_the_same_checkpoint_paths():
-    """prepare.sh, start.sh and the image's model directories agree."""
+    """prepare.sh and start.sh name the same checkpoint paths, under the image's /models mount point."""
     prepare, start = PREPARE.read_text(), (ROOT / 'start.sh').read_text()
     dockerfile, build = (ROOT / 'docker/Dockerfile').read_text(), (ROOT / 'docker/build.sh').read_text()
+    assert re.search(r'^    for mount in .*\bmodels\b.*; do$', build, re.M)
     for name, role in zip(MODELS, ('EXPORT', 'OFFICIAL', 'HYBRID')):
         assert f'{role}_DIR=/models/{name}\n' in prepare
         assert f'{role}_MOUNT=/models/{name}\n' in start
-        assert f'/models/{name}' in dockerfile and f'models/{name}' in build
+        assert f'/models/{name}' in dockerfile
 
 
 def test_checkpoints_are_pinned_alike_for_start_and_compose():

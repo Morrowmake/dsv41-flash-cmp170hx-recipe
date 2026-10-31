@@ -2,51 +2,47 @@
 
 `build.sh` is rootless and CPU-only (`CUDA_VISIBLE_DEVICES=""`); Docker is not
 needed. Choose new, dedicated `STAGE` and `OUT` directories. Builds never
-publish. `CONSTRAINTS` is the complete installed dependency lock, excluding
-editable vLLM. Every installation uses it, and packaging rejects missing, extra
-or changed distributions (including python-dotenv). Python is pinned to
-3.12.14; the CUDA base and extension wheel remain pinned by digest and commit.
-Version constraints reproduce the installed dependency set; wheel-download
-hashes and a bit-for-bit compiler result are separate checks.
+publish. `CONSTRAINTS` is the complete installed dependency lock; the engine and
+the plugin are not installed in the venv (`PYTHONPATH` names their trees).
+Every installation uses it, and packaging rejects missing, extra or changed
+distributions. Python is pinned to 3.12.14; the CUDA base, the upstream wheel and
+the three engine commits remain pinned by digest, sha256 and commit. Version
+constraints reproduce the installed dependency set; wheel-download hashes and a
+bit-for-bit compiler result are separate checks.
 
-The layers are Python, dependencies, native engine libraries, editable engine
-source/metadata with the release's launch (`/opt/recipe/serve.sh`), and
-optionally a compilation-cache seed. Engine metadata, editable finders and the
-native manifest (`/opt/venv/.native-manifest.json`) belong to the engine layer.
-Our compiled extensions are not compiled by either builder:
-`native_build.py build` makes them once in the pinned base image, native
-validation installs exactly those files (`native_build.py install`), and the
-release pins the resulting manifest's sha256 in `build.sh`
-(`RELEASE_NATIVE_MANIFEST_SHA256`) and the `Dockerfile` (`NATIVE_MANIFEST_SHA256`).
-`build.sh` packs them from `NATIVE_DIR` and finishes with `native_build.py
-check-oci` against the assembled image.
-This release's manifest also lists `vllm/_C_stable_libtorch`, rebuilt from the
-fork because the fork changes the Marlin kernel that upstream compiles into it;
-the image never runs the precompiled wheel's copy. `native_build.py build` does
-not compile that library yet, so the release packs the validated files by their
-pinned hash rather than rebuilding them.
-Native libraries reuse a layer only when their bytes are identical; a Python
-release never reuses native bytes solely on the basis of a branch name.
+The engine is an assembly of three pinned commits (`RELEASE_UPSTREAM_COMMIT`,
+`RELEASE_QUEUE_COMMIT`, `RELEASE_PLUGIN_COMMIT`, the same as `recipe.toml`'s
+`[pins]` and `assembly.json`): the queue's files with the upstream wheel's build
+products in `/opt/assembly/engine`, the plugin's files with its natives and
+metadata in `/opt/assembly/plugin`, and `assembly.json`. The layers are Python,
+dependencies, native libraries (every `.so` of `/opt/assembly`) and the engine
+(the rest of `/opt/assembly`, `/opt/image-tools` and the release's launch,
+`/opt/recipe/serve.sh`). The plugin's natives are not compiled by the image
+build: `native_build.py build --plugin` makes them in the pinned base image (in
+`build.sh`, or beforehand with `NATIVE_DIR`), and they must be the validated
+build's bytes (`native-manifest.json`, pinned by
+`RELEASE_NATIVE_MANIFEST_SHA256` and named by `RELEASE_NATIVE_BUILD`). `build.sh`
+finishes by checking `/opt/assembly` in the assembled image against the files it
+assembled and with `native_build.py check-oci`.
+Native libraries reuse a layer only when their bytes are identical.
 `layers.json` records every compressed size and digest. `IMAGE_LAYERED=1` and
 `IMAGE_PARALLEL_COMPRESSION=1` are the defaults; set either to `0` to disable.
 GNU tar normalizes metadata, then pigz compresses independent layers in parallel
-(`IMAGE_COMPRESSION_THREADS=16` threads per layer). OCI assembly writes these
+(`IMAGE_THREADS=16` threads per layer). OCI assembly writes these
 compressed blobs directly, so crane does not recompress them at publication.
 Keep the same compression settings to reuse layer digests.
 
 ```bash
-CUDA_VISIBLE_DEVICES="" VLLM_COMMIT=<full-commit> NATIVE_DIR=/path/to/native \
-  CLONE_FROM=/path/to/source CLONE_BRANCH=<branch> \
+CUDA_VISIBLE_DEVICES="" BASE_OCI=/path/to/base-oci \
   STAGE=/path/to/new-stage OUT=/path/to/new-output ./docker/build.sh
 ```
 
-`STEP=assemble` packages an already finalized staging tree; `BASE_OCI` can name
-an audited retained base for offline assembly. Neither changes the immutable
-engine pin. Source Git stores are checked, then removed before any runtime
-layer is created. `Dockerfile` uses the same constraints and final partition,
-though its intermediate stages are build-only. Pass Docker build argument
-`IMAGE_LAYERED=0` for its single-runtime-layer path. The Docker path has no optional
-seed input; use the rootless builder for seeded release images.
+`STEP=assemble` packages an already built staging tree; `BASE_OCI` can name
+an audited retained base for offline assembly. Neither changes the pins.
+`CLONE_FROM` fetches the queue and the plugin from another repository (by the
+release tags, or the pinned commits); the fetched commits must be the pins. No
+Git data enters the image. The Docker path (`Dockerfile`) builds a single-tree
+engine, not this release's assembly.
 
 ## The launch
 
@@ -61,8 +57,7 @@ native files with the reference launch generated from the enablement-only
 settings (only what the model needs to run on these cards):
 
 ```bash
-CUDA_VISIBLE_DEVICES="" VLLM_COMMIT=<full-commit> NATIVE_DIR=/path/to/native \
-  SERVE_SH=/path/to/enablement-only/serve.sh \
+CUDA_VISIBLE_DEVICES="" SERVE_SH=/path/to/enablement-only/serve.sh BASE_OCI=/path/to/base-oci \
   STAGE=/path/to/new-stage OUT=/path/to/new-output ./docker/build.sh
 ```
 
@@ -98,9 +93,7 @@ eval "$(/opt/venv/bin/python /opt/image-tools/cache_seed.py identity /cache/iden
 # Pack from the host after the runtime exits:
 python3 docker/cache_seed.py pack /path/to/cache/compiled/<identity-hash> \
   /path/to/cache/identity.json /path/to/new-seed
-# Append the verified seed as its own release layer:
-CUDA_VISIBLE_DEVICES="" STEP=assemble IMAGE_CACHE_SEED_DIR=/path/to/new-seed \
-  STAGE=/path/to/finalized-stage OUT=/path/to/new-output ./docker/build.sh
+# build.sh has no seed layer for an assembled engine: this release ships without a seed.
 ```
 
 The coordinator's reserved GPU leg must generate and compare these caches.

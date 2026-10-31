@@ -7,15 +7,22 @@ image, how to build it, and how to run it by hand with `docker run`.
 
 ## What the image contains
 
-- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/a0c57b52376efd67c57735bc949d4bafa22ae29e)
-  pinned at `a0c57b52376efd67c57735bc949d4bafa22ae29e`, on upstream `4e0681ed56`, installed
-  editable in `/opt/venv` (Python 3.12, torch 2.13.0, CUDA 13.0 build) with the
-  upstream compiled extensions from `4e0681ed56`'s own nightly wheel, then the
-  runtime extras the engine pins. The installed package list is in
+- **Engine:** an assembled engine in `/opt/assembly`, three pinned trees and
+  nothing compiled in the image:
+  - `engine/`: the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx)'s patch
+    queue at `0af5991c009e0c3ff4181f026a8e7dffe1370b45` (tag
+    `dsv41-flash-recipe-1.0.1-queue`), on upstream `330c5bffee`, with the compiled
+    extensions of `330c5bffee`'s own nightly wheel;
+  - `plugin/`: the sm_80 plugin `vllm_sm80` at
+    `0b34823c39ba0fd5c0d4690887882b4cfa69034e` (tag `dsv41-flash-recipe-1.0.1-plugin`)
+    with its compiled extensions: the sm_80 EXL3 library (`vllm_sm80._exl3_C`,
+    required: the routed experts run on it) and the Marlin library;
+  - `assembly.json`: the pins, the wheel and the natives' sha256.
+
+  Python 3.12 is `/opt/python`; `/opt/venv` holds the dependency lock (torch
+  2.14.0, CUDA 13.0 build) and not the engine: `PYTHONPATH` names
+  `/opt/assembly/engine:/opt/assembly/plugin`. The installed package list is in
   `/opt/venv/requirements.lock.txt`.
-- **The fork's compiled extensions:** the sm_80 EXL3 library (`vllm._exl3_C`,
-  required: the routed experts run on it) and the Marlin library, distinct
-  from the upstream base extensions.
 - **The release's launch:** `/opt/recipe/serve.sh`, generated from the
   settings this release was validated with: the engine command and every
   serving default, for the one layout (`LAYOUT=tp4`). The recipe runs it through
@@ -24,8 +31,8 @@ image, how to build it, and how to run it by hand with `docker run`.
 - **Base:** `nvidia/cuda:13.3.1-devel-ubuntu24.04`, pinned by digest. It is the
   devel image because Triton, TileLang, FlashInfer and the host-memory
   all-reduce compile kernels at run time and need `nvcc` and `g++`.
-- **Entry point:** the `vllm` CLI. The recipe replaces it with
-  `docker/entry.sh`.
+- **Entry point:** the `vllm` CLI (`/opt/venv/bin/python3 -m
+  vllm.entrypoints.cli.main`). The recipe replaces it with `docker/entry.sh`.
 - **Peer check:** a prebuilt sm_80 content probe, selected only when its source
   hash matches the mounted recipe. `P2P_PREBUILT=0` uses runtime compilation.
   The startup banner reports build, identity and check time, with transport,
@@ -33,115 +40,88 @@ image, how to build it, and how to run it by hand with `docker run`.
   remains cached by driver, ordered GPU UUIDs, source hash and host boot.
 - **No compiled kernel cache.** The first start compiles its kernels into the
   cache mount.
-- **No weights.** The checkpoints are mounted from the host. The engine source
-  in `/opt/vllm-src` includes the builder the recipe uses to make the hybrid
-  checkpoint (`tools/sm80/build_hybrid_checkpoint.py`).
+- **No weights.** The checkpoints are mounted from the host. The plugin tree
+  includes the builder the recipe uses to make the hybrid checkpoint
+  (`/opt/assembly/plugin/tools/sm80/build_hybrid_checkpoint.py`).
 
 Engine image tag:
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx:engine-a0c57b5237
+ghcr.io/morrowmake/vllm-cmp170hx:engine-0af5991c00
 ```
 
-The OCI revision is `a0c57b52376efd67c57735bc949d4bafa22ae29e`.
+The OCI revision is the queue commit `0af5991c009e0c3ff4181f026a8e7dffe1370b45`;
+labels name all three pins and the native build.
 Image tags identify engine source, independently of recipe release numbers.
 Publication requires validation and acceptance of the exact image digest.
 
 ## Build it
 
-**The fork's compiled extensions** are built once, before the image, by
-`docker/native_build.py` inside the pinned CUDA base image (rootless, with
-bubblewrap; fixed paths). Native validation runs those exact files, and both
-builders pack them by hash; neither compiles them.
-`RELEASE_NATIVE_MANIFEST_SHA256` in `build.sh` (and `NATIVE_MANIFEST_SHA256` in
-the `Dockerfile`) pins the validated `manifest.json`; a different build, commit
-or toolchain fails the image build.
+[`build.sh`](build.sh) builds the image rootless and without a GPU or a Docker
+daemon: it prepares `/opt` on the host, splits it into deterministic layers and
+writes an OCI layout on the pinned base. Nothing of the engine is compiled into
+the image; it assembles three pinned inputs:
 
-This release's manifest also lists `vllm/_C_stable_libtorch`: the fork changes
-the Marlin kernel (`csrc/quantization/marlin/marlin.cu`), which upstream compiles
-into that library, so the image ships it rebuilt from the fork in the same pinned
-base image instead of the precompiled wheel's copy. `docker/native_build.py
-build` does not compile that library yet; the release image carries the
-validated files, checked by the pinned hash.
+- **The queue and the plugin** are fetched from the public fork by their release
+  tags (`dsv41-flash-recipe-1.0.1-queue`, `dsv41-flash-recipe-1.0.1-plugin`); each
+  tag must name its pinned commit (`RELEASE_QUEUE_COMMIT`, `RELEASE_PLUGIN_COMMIT`).
+  The trees are the commits' files exactly, without Git data.
+- **The upstream wheel** of `RELEASE_UPSTREAM_COMMIT`, pinned by URL and sha256:
+  its members under `vllm/` that neither the queue nor the upstream commit
+  tracks (the compiled extensions and vendored trees) go into `engine/`, and its
+  `vllm/_version.py` names the queue commit. The build refuses a queue that
+  changes what those extensions are built from.
+- **The plugin's compiled extensions** are built by `docker/native_build.py build
+  --plugin` inside the pinned CUDA base image (rootless, with bubblewrap; fixed
+  paths), from the plugin's `csrc/` alone. They must be the bytes of the validated
+  build, whose `manifest.json` ships as [`native-manifest.json`](native-manifest.json)
+  and is pinned by `RELEASE_NATIVE_MANIFEST_SHA256`: the build checks every file's
+  sha256 against it and reports any other manifest field that differs (where and
+  when it was built aside). `NATIVE_DIR` uses an earlier `native_build.py build
+  --plugin` output instead.
 
-**The launch** comes from `SERVE_SH` (rootless builder) or the `SERVE_SH` build
-argument (Docker), this repository's `serve.sh` by default. It is generated from
-the release settings, never written by hand; the builders refuse an empty file
-or one that is not a bash launcher, and `build.sh` records its sha256 in
-`$OUT/serve-sh.sha256`.
+[`assembly.json`](assembly.json), the release's record of the assembly, is checked
+field by field against what was built and goes into the image unchanged. The
+venv is the dependency lock [`CONSTRAINTS`](CONSTRAINTS), checked after install.
+The build ends by checking that the OCI image's `/opt/assembly` holds exactly
+the assembled files (paths, sha256, modes, link targets) and the pinned natives
+(`native-check.json`).
+
+**The launch** comes from `SERVE_SH`, this repository's `serve.sh` by default. It
+is generated from the release settings, never written by hand; the builder
+refuses an empty file or one that is not a bash launcher, and records its sha256
+in `$OUT/serve-sh.sha256`.
 
 ```bash
 crane pull --platform linux/amd64 --format oci \
   nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87 /path/to/base-oci
-python3 docker/native_build.py build --repo /path/to/fork-clone --commit <full-engine-commit> \
-  --base-oci /path/to/base-oci --work /path/to/new-scratch --out /path/to/native --uv "$(command -v uv)"
-NATIVE_DIR=/path/to/native VLLM_COMMIT=<full-engine-commit> CLONE_FROM=/path/to/source \
-  CLONE_BRANCH=<source-branch> STAGE=/path/to/new-owned-staging-directory ./docker/build.sh
+BASE_OCI=/path/to/base-oci STAGE=/path/to/new-owned-staging-directory OUT=/path/to/new-output \
+  ./docker/build.sh
 ```
 
-`manifest.json` records the source commit and input trees, the base image and
-compiler digests, torch and its library hashes, the flags and each file's
-sha256; it names no host path. For the Docker path, copy the output directory
-to `docker/native/`. `build.sh` ends by checking that the assembled OCI image
-holds exactly the manifest's files (`native-check.json`).
+Without `BASE_OCI` it pulls the base with `crane`. `CLONE_FROM=/path/to/repo`
+fetches the queue and the plugin from another Git repository (by the tags, or by
+the pinned commits where it has no such tags); `WHEEL=/path/to/wheel` uses a local
+copy of the wheel. Both are checked against the same pins.
+`STEP=relocate` and `STEP=assemble` resume a `STAGE` it built; choose a new `OUT`
+each time.
 
-Both builders precompile the peer probe without using a GPU. To omit it, set
-`IMAGE_P2P_PREBUILD=0` for the rootless builder or pass
-`--build-arg IMAGE_P2P_PREBUILD=0` to `docker/build-docker.sh`. The Docker wrapper
-uses the repository root as its build context, restricted by `.dockerignore`.
+The builder precompiles the peer probe without using a GPU; `IMAGE_P2P_PREBUILD=0`
+omits it. `IMAGE_LAYERED=0` keeps one runtime layer and
+`IMAGE_PARALLEL_COMPRESSION=0` uses gzip. It prints the total filesystem layer
+count, including the base, and fails above 123 before compressing; the
+troubleshooting kill switch is `IMAGE_LAYER_COUNT_CHECK=0` (default 1).
 
-The builder replaces `STAGE`: choose a new dedicated path. It produces a local
-OCI image in `docker/out/`, without publishing it. Set `OUT=/path/to/new-output`
-to preserve earlier image evidence. Local `CLONE_FROM` sources use Git transport
-cloning (`--no-local`), never object-directory copying or hardlinks. Only the
-selected history and explicit upstream version tag are retained during the build;
-objects newer than an overridden pin are pruned. Before removal, the actual
-source HEAD, self-contained Git stores and absence of unreachable objects are
-checked, including submodule stores. After version construction, both builders
-remove all Git metadata **before** copying or archiving the application payload
-into any final runtime layer. No contaminated application layer is reused.
+Before layering, nothing in `/opt` may still name the staging path, a home
+directory or (reported for review in `hostname-hits.txt`) the build host.
 
-The final source tree remains editable Python source, but is not a Git checkout.
-Its root-owned, read-only `/opt/vllm-src/provenance.json` records `schema` (1),
-`engine_commit` (full hash), `engine_repository` (public fork URL) and
-`engine_version` (installed version). The OCI revision label retains the same
-commit.
-Layer assembly rejects retained Git metadata/object stores and forbidden build
-paths, including standard nested gzip, bzip2, xz, tar and zip payloads. Set
-`IMAGE_FORBIDDEN_STRINGS` to a JSON array of additional identifying strings for
-the rootless build. Do not pass private identifier lists through Docker build
-arguments or labels; use a separate private audit of the resulting image. Broad
-name matches still need attribution review; upstream copyright/author notices
-are retained.
-For Docker, add build arguments `VLLM_REPO`, `VLLM_BRANCH`, `VLLM_COMMIT` naming
-a source reachable inside the build.
-
-Build the release source with Docker:
-
-```bash
-bash docker/build-docker.sh vllm-cmp170hx:engine-a0c57b5237
-```
-
-Both build paths print the total filesystem layer count, including the base,
-and fail above 123. OCI assembly checks before compression; the Docker wrapper
-checks the final image's `RootFS.Layers` after building. Use the wrapper for
-Docker builds; a bare `docker build` bypasses this check. The troubleshooting
-kill switch is `IMAGE_LAYER_COUNT_CHECK=0` (default 1).
-
-The build needs no GPU. It clones the fork at the pinned commit and downloads
-torch, the precompiled extensions and the runtime extras, so it takes a while
-and needs network access.
-
-The release uses the rootless application-layer assembly
-approach in [`build.sh`](build.sh). The current builder prepares the runtime
-tree on the host, creates separate deterministic layers and writes an OCI
-layout without a Docker daemon. [crane](https://github.com/google/go-containerregistry)
-fetches the pinned base and publishes the retained OCI without recompression.
-See [release procedure](RELEASE.md) for the dependency lock, compression
-switches, cache-seed gates and publication. Rebuilding with either
-builder produces a separate artifact; it does not reproduce or revalidate the
-frozen digest automatically. Validate the resulting provenance, layers and
-runtime before distributing any rebuilt image.
+The build needs no GPU. It downloads Python, the wheel, torch and the runtime
+extras, so it takes a while and needs network access. The Docker builder
+(`Dockerfile`, `build-docker.sh`) builds a single-tree engine and does not build
+this release's assembled engine. See [release procedure](RELEASE.md) for the
+compression switches and publication. A rebuild produces a separate artifact; it
+does not revalidate the frozen digest. Validate the resulting provenance, layers
+and runtime before distributing any rebuilt image.
 
 ## Run it by hand
 
@@ -160,7 +140,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-a0c57b5237
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-0af5991c00
 MODELS=$PWD/models                  # the three directories ./download.sh made
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 MEM=$(awk '$1 == "MemTotal:" {print $2 "k"}' /proc/meminfo)   # limit, swap included: never swap
@@ -226,9 +206,11 @@ The OCI Apache-2.0 label describes the vLLM engine, not a blanket licence for
 every file in the image. CUDA/NVIDIA components, Python dependencies and
 upstream third-party code retain their respective licences and notices.
 
-The image build retains the recipe's MIT grant at `/opt/image-tools/LICENSE`
-and the DeepGEMM derivative-reference notice at
+The image carries the engine's Apache-2.0 licence (the queue tree's `LICENSE`)
+at `/opt/image-tools/LICENSE` and the DeepGEMM derivative-reference notice at
 `/opt/image-tools/THIRD_PARTY_NOTICES`; image smoke checks the complete bytes.
-The bundled FLA MIT grant remains in the engine source.
+The plugin's licence files, the bundled FLA MIT grant and the other upstream
+notices remain in `/opt/assembly`. This recipe's own MIT licence covers the
+recipe's files, which are mounted from the checkout.
 Model weights are downloaded separately and have
 [their own licences](../docs/model-licences.md).

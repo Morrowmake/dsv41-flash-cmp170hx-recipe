@@ -126,6 +126,17 @@ def base(tmp_path):
     return b
 
 
+def pin_of(b):
+    """The (index, manifest) pin of a fixture base: its top manifest, with no index."""
+    return "sha256:" + "1" * 64, json.loads((b / "index.json").read_text())["manifests"][0]["digest"]
+
+
+def assemble(b, p, out, pin, tag, **kw):
+    """oci.assemble on a fixture base, with no declared image environment."""
+    return oci.assemble(b, p, out, pin, tag, {}, pin_of(b), **kw)
+
+
+
 def publication_image(tmp_path, labels=None):
     root = base(tmp_path)
     manifest, config = oci.image(root)
@@ -149,7 +160,7 @@ def test_layer_reuse_and_reproducibility(tmp_path):
         out = tmp_path / str(n) / "oci"
         if n == 2:
             (p / "engine/opt/engine/file").write_text("changed Python")
-        oci.assemble(b, p, out, PIN if n < 2 else "b"*40, "engine-" + (PIN if n < 2 else "b"*40)[:10], threads=2)
+        assemble(b, p, out, PIN if n < 2 else "b"*40, "engine-" + (PIN if n < 2 else "b"*40)[:10], threads=2)
         reports.append(json.loads((out.parent / "layers.json").read_text()))
     assert reports[0] == reports[1]
     assert reports[0][:3] == reports[2][:3]
@@ -169,7 +180,7 @@ def test_kill_switches(tmp_path):
         d = p / name
         d.mkdir(parents=True)
         (d / name).write_text(name)
-    oci.assemble(b, p, tmp_path / "out/oci", PIN, "engine-" + PIN[:10], layered=False, parallel=False)
+    assemble(b, p, tmp_path / "out/oci", PIN, "engine-" + PIN[:10], layered=False, parallel=False)
     m, c = oci.image(tmp_path / "out/oci")
     assert len(m["layers"]) == 1
 
@@ -350,7 +361,7 @@ def test_audit_tmp_tar_entry(tmp_path, layered, mode, uid, gid, passed):
     (p / 'engine/tmp').mkdir()
     (p / 'engine/tmp').chmod(0o1777)
     out = tmp_path / 'out/oci'
-    oci.assemble(b, p, out, PIN, "engine-" + PIN[:10], layered=layered, parallel=False)
+    assemble(b, p, out, PIN, "engine-" + PIN[:10], layered=layered, parallel=False)
     manifest, config = oci.image(out)
     # Mutate real tar metadata and recompute OCI integrity to isolate the mode gate.
     desc = manifest['layers'][-1]
@@ -385,14 +396,17 @@ def test_smoke_checks_image_tmp_before_mount(tmp_path, mode):
 
 
 @pytest.mark.parametrize('notice', ['complete', 'missing', 'truncated', 'changed'])
-def test_smoke_checks_packaged_recipe_license(tmp_path, monkeypatch, notice):
+def test_smoke_checks_packaged_engine_license(tmp_path, monkeypatch, notice):
     import rootfs_smoke
     (tmp_path / 'tmp').mkdir()
     (tmp_path / 'tmp').chmod(0o1777)
     packaged = tmp_path / 'opt/image-tools/LICENSE'
     packaged.parent.mkdir(parents=True)
     (packaged.parent / 'THIRD_PARTY_NOTICES').write_bytes((ROOT / 'THIRD_PARTY_NOTICES').read_bytes())
-    source = (ROOT.parent / 'LICENSE').read_bytes()
+    engine = tmp_path / 'opt/assembly/engine/LICENSE'
+    engine.parent.mkdir(parents=True)
+    engine.write_bytes(b'Apache License\nVersion 2.0, January 2004\n')
+    source = engine.read_bytes()
     if notice != 'missing':
         packaged.write_bytes(source if notice == 'complete' else
                              source[:-1] if notice == 'truncated' else b'X' + source[1:])

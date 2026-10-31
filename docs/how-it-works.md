@@ -28,9 +28,15 @@ instead, through a row cache in host RAM per card
 
 ## What makes it fast, and correct
 
-- **Whole experts per card.** Tensor-parallel 4 with expert parallelism: each
-  card holds 96 of the 384 routed experts whole, so an expert's work never
-  needs a reduction of its own.
+- **Routed experts split across the cards, evenly loaded.** Tensor-parallel 4
+  with every routed expert split by columns across the four cards, the chunks
+  rotated per expert: each card holds a wide chunk of half of each layer's
+  experts and a narrow chunk of the other half, so every card does the same
+  routed work per layer. The cards' partial outputs are summed in the MoE
+  all-reduce.
+- **A compressed all-reduce.** The four-card all-reduce sends its BF16
+  messages in a lossless compressed wire format over PCIe peer-to-peer; the
+  sums are bitwise those of the uncompressed kernel.
 - **EXL3 experts on the tensor cores.** The routed experts run on Ampere
   tensor-core kernels for both decode-sized and prefill-sized calls, with the
   weights decoded on the fly from the EXL3 trellis.
@@ -65,9 +71,9 @@ Every feature has a switch ([Engine switches](engine-switches.md)).
 | Model id | `dsv41-flash` |
 | Weights | the hybrid of [`LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw`](https://huggingface.co/LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw) (routed experts, EXL3 2.9 bpw) and [`deepseek-ai/DeepSeek-V4.1-Flash-1017`](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017) (everything else) |
 | Drafter | DSpark, inside the checkpoint: up to 7 draft tokens per step at one request, 5 at two to eight; from three requests the verify width is chosen per step |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`a0c57b52376efd67c57735bc949d4bafa22ae29e`](https://github.com/Morrowmake/vllm-cmp170hx/commit/a0c57b52376efd67c57735bc949d4bafa22ae29e), on upstream vLLM `4e0681ed56` |
-| Container image | `ghcr.io/morrowmake/vllm-cmp170hx:engine-a0c57b5237`, pinned by digest in `start.sh` — the engine at that pin and the release's launch, no weights ([docker/](../docker/README.md)) |
-| Layout | tensor-parallel 4 with expert parallelism; assumes PCIe Gen2 x16 |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) patch queue @ [`0af5991c009e0c3ff4181f026a8e7dffe1370b45`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-queue) (tag `dsv41-flash-recipe-1.0.1-queue`) and sm_80 plugin `vllm_sm80` @ [`0b34823c39ba0fd5c0d4690887882b4cfa69034e`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin) (tag `dsv41-flash-recipe-1.0.1-plugin`), on upstream vLLM `330c5bffee` |
+| Container image | `ghcr.io/morrowmake/vllm-cmp170hx:engine-0af5991c00`, pinned by digest in `start.sh` — the engine at those pins and the release's launch, no weights ([docker/](../docker/README.md)) |
+| Layout | tensor-parallel 4, routed experts split across the four cards with per-expert chunk rotation; assumes PCIe Gen2 x16 |
 | Context | 262,144 tokens |
 | Concurrency | up to 8 requests; the scheduler's budget is 2,048 tokens per step |
 | KV cache | BF16, **not quantised**: 1,247,406 tokens at 262,144 context with verified peer-to-peer |

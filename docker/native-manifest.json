@@ -1,0 +1,116 @@
+{
+  "artefacts": {
+    "vllm_sm80/_ampere_marlin_C.abi3.so": {
+      "bytes": 1983320,
+      "sha256": "e4abeeae70b7f7edb3145f36d55e3a06dc153ed7d869d18b39b0cd9de7ff3805"
+    },
+    "vllm_sm80/_exl3_C.abi3.so": {
+      "bytes": 3760368,
+      "sha256": "18d04f81b8842aff96b51b0fb5b61ea2390e786925b0f00288538c6b7f120f19"
+    }
+  },
+  "builder_sha256": "de07ed4d0d717aa542eaa29761293e66af8aadde302534526c77c0b801d66eb4",
+  "constraints_sha256": "0b1e618e0d9682d98d07a49f8d3ccf314acdb88462f62b051cf19211c12efe78",
+  "environment": {
+    "CUDA_HOME": "/usr/local/cuda",
+    "CUDA_VISIBLE_DEVICES": "",
+    "HOME": "/root",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "LOGNAME": "root",
+    "NVCC_APPEND_FLAGS": "-objtemp",
+    "PATH": "/opt/venv/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "SOURCE_DATE_EPOCH": "1793322764",
+    "TMPDIR": "/tmp",
+    "TORCH_CUDA_ARCH_LIST": "8.0",
+    "TZ": "UTC",
+    "USER": "root"
+  },
+  "extensions": {
+    "vllm_sm80/_ampere_marlin_C.abi3.so": {
+      "builder": "csrc/ampere_marlin/build_standalone.py",
+      "flags": {
+        "cflags": "-DTORCH_EXTENSION_NAME=_ampere_marlin_C -DTORCH_API_INCLUDE_EXTENSION_H -I/opt/vllm-src/csrc -isystem /opt/venv/lib/python3.12/site-packages/torch/include -isystem /opt/venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include -isystem /usr/local/cuda/include -isystem /opt/python/include/python3.12 -fPIC -std=c++20 -O3 -std=c++20 -DUSE_CUDA -ffile-prefix-map=/opt/vllm-src=vllm -ffile-prefix-map=/tmp/native-build/ampere_marlin=build -ffile-prefix-map=/root=source -ffile-prefix-map=/opt/venv/lib/python3.12/site-packages/torch=torch",
+        "cuda_cflags": "-DTORCH_EXTENSION_NAME=_ampere_marlin_C -DTORCH_API_INCLUDE_EXTENSION_H -I/opt/vllm-src/csrc -isystem /opt/venv/lib/python3.12/site-packages/torch/include -isystem /opt/venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include -isystem /usr/local/cuda/include -isystem /opt/python/include/python3.12 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr -gencode=arch=compute_80,code=sm_80 --compiler-options '-fPIC' -O3 -std=c++20 -DUSE_CUDA --expt-relaxed-constexpr --threads=4 -static-global-template-stub=false -U__CUDA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF_CONVERSIONS__ -U__CUDA_NO_BFLOAT16_CONVERSIONS__ -U__CUDA_NO_HALF2_OPERATORS__ -DENABLE_FP8 -Xcompiler=-ffile-prefix-map=/opt/vllm-src=vllm -Xcompiler=-ffile-prefix-map=/tmp/native-build/ampere_marlin=build -Xcompiler=-ffile-prefix-map=/root=source -Xcompiler=-ffile-prefix-map=/opt/venv/lib/python3.12/site-packages/torch=torch",
+        "cuda_post_cflags": "",
+        "cxx": "c++",
+        "ldflags": "-shared -L/opt/venv/lib/python3.12/site-packages/torch/lib -lc10 -lc10_cuda -ltorch_cpu -ltorch_cuda -ltorch -ltorch_python -L/usr/local/cuda/lib64 -lcudart",
+        "nvcc": "/usr/local/cuda/bin/nvcc",
+        "post_cflags": ""
+      }
+    },
+    "vllm_sm80/_exl3_C.abi3.so": {
+      "builder": "csrc/exl3/build_standalone.py",
+      "command": "cd /opt/vllm-src && /opt/venv/bin/python csrc/exl3/build_standalone.py --out /tmp/native-build/out/vllm_sm80 --build-dir /tmp/native-build/exl3 --verbose",
+      "flags": {
+        "cflags": "-DTORCH_EXTENSION_NAME=_exl3_C -DTORCH_API_INCLUDE_EXTENSION_H -I/opt/vllm-src/csrc -isystem /opt/venv/lib/python3.12/site-packages/torch/include -isystem /opt/venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include -isystem /usr/local/cuda/include -isystem /opt/python/include/python3.12 -fPIC -std=c++20 -O3 -std=gnu++20 -DNDEBUG -DUSE_CUDA -DPy_LIMITED_API=3 -ffile-prefix-map=/opt/vllm-src=vllm -ffile-prefix-map=/tmp/native-build/exl3=build -ffile-prefix-map=/root=source -ffile-prefix-map=/opt/venv/lib/python3.12/site-packages/torch=torch",
+        "cuda_cflags": "-DTORCH_EXTENSION_NAME=_exl3_C -DTORCH_API_INCLUDE_EXTENSION_H -I/opt/vllm-src/csrc -isystem /opt/venv/lib/python3.12/site-packages/torch/include -isystem /opt/venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include -isystem /usr/local/cuda/include -isystem /opt/python/include/python3.12 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr -gencode=arch=compute_80,code=sm_80 --compiler-options '-fPIC' -O3 -std=c++20 -DNDEBUG -DUSE_CUDA -DPy_LIMITED_API=3 -DENABLE_FP8 -DENABLE_SCALED_MM_C2X=1 --expt-relaxed-constexpr --expt-extended-lambda --compress-mode=size -U__CUDA_NO_HALF_OPERATORS__ -U__CUDA_NO_HALF_CONVERSIONS__ -U__CUDA_NO_BFLOAT16_CONVERSIONS__ -U__CUDA_NO_HALF2_OPERATORS__ -Xcompiler=-ffile-prefix-map=/opt/vllm-src=vllm -Xcompiler=-ffile-prefix-map=/tmp/native-build/exl3=build -Xcompiler=-ffile-prefix-map=/root=source -Xcompiler=-ffile-prefix-map=/opt/venv/lib/python3.12/site-packages/torch=torch",
+        "cuda_post_cflags": "",
+        "cxx": "c++",
+        "ldflags": "-shared -L/opt/venv/lib/python3.12/site-packages/torch/lib -lc10 -lc10_cuda -ltorch_cpu -ltorch_cuda -ltorch -ltorch_python -L/usr/local/cuda/lib64 -lcudart",
+        "nvcc": "/usr/local/cuda/bin/nvcc",
+        "post_cflags": ""
+      }
+    }
+  },
+  "layout": {
+    "build": "/tmp/native-build",
+    "python": "/opt/python",
+    "source": "/opt/vllm-src",
+    "venv": "/opt/venv"
+  },
+  "package": "vllm_sm80",
+  "python": {
+    "cxx11_abi": true,
+    "python": "3.12.14",
+    "python_include_sha256": "353cf94fc276293c5161e8234f8bcdd7e6bc2d566f938690cbe94d85f5292858",
+    "torch": "2.14.0+cu130",
+    "torch_cuda": "13.0",
+    "torch_include_sha256": "20d347ec126d59ded289af744edb693f669006e980e92ebc83895285958ceb66",
+    "torch_libs": {
+      "libc10.so": "d8bcc0e6cc3d0b78875b32d04f13887b23e042aaaad4f5b2e399e18237d59234",
+      "libc10_cuda.so": "82c0926b881dc5626b9f1b28bacccbf098a71321305098fda8f1248c4c0175e5",
+      "libtorch.so": "745bf5b70c96b7bc369292449f2dec3284f435e99c0ada242bbfc7e6ade88872",
+      "libtorch_cpu.so": "7939d5f727123dd5536aefd0eb634544c888eedfa21f00f9d336df07de9872ed",
+      "libtorch_cuda.so": "9ed4b912d08ae0a59c1638e9077b6d8f0439d7bd680e4a1a274441d42dd7b3f9",
+      "libtorch_python.so": "a16d9190d124cdf3d4881803536b1a1878c6f163d102d44a0506cd0604cf6a58"
+    }
+  },
+  "schema": 1,
+  "source": {
+    "commit": "c8732c6f2c990937b146e1924d2ee929a5766fec",
+    "commit_time": 1793322764,
+    "inputs": {
+      "csrc": "6a7c62b43cde9c49ee93be74e08d8db3284257f4"
+    }
+  },
+  "toolchain": {
+    "base_image": {
+      "config": "sha256:de67990f458ce6af607fc5d329060d7e35c38e969df27b932921d53b093b202e",
+      "index": "sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87",
+      "manifest": "sha256:03c372fd9c65fe7739279f8c65473b315dc61efaaffab03e1e65bc7be7aee61e"
+    },
+    "cxx": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "ld": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+    "ninja": "1.13.2.git.kitware.jobserver-pipe-1",
+    "nvcc": [
+      "Cuda compilation tools, release 13.3, V13.3.73",
+      "Build cuda_13.3.r13.3/compiler.38244171_0"
+    ],
+    "sha256": {
+      "/usr/bin/x86_64-linux-gnu-as": "21aff249b692b5c31a44007491f922dcb49f41323e362c57d2ada3f52eddb7f0",
+      "/usr/bin/x86_64-linux-gnu-g++-13": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+      "/usr/bin/x86_64-linux-gnu-ld.bfd": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b",
+      "/usr/libexec/gcc/x86_64-linux-gnu/13/cc1plus": "840b332fb62ec6f694ac77d91fe69ef7f80b0d69512ed89374af0ee7a506255d",
+      "/usr/local/cuda-13.3/bin/cudafe++": "d4f0602a58e6d698ebbdbd7f843bf6a714fafe884e9ee1d788c9fc4f463f55b9",
+      "/usr/local/cuda-13.3/bin/fatbinary": "b2e91ecc1cc6b64ab51a2315e98a8997ab40a0aab922e579bc9093858ec4f96d",
+      "/usr/local/cuda-13.3/bin/nvcc": "0d3511aa5fe86ae6565618aeebbdd2a7e4fe8affa1980787071199e1cdae07dc",
+      "/usr/local/cuda-13.3/bin/nvlink": "2ec3fbac34d2e6f6a4dbb69547497d37aa6507aeed7c42c24604700fd9b45667",
+      "/usr/local/cuda-13.3/bin/ptxas": "afd8d1e1fa6e310f7faee44f6621e4c1315fb7fd6da7d4d87414358e12a651dc",
+      "/usr/local/cuda-13.3/nvvm/bin/cicc": "3024029e5c7024938d4194b7b7f0b7f07736b614a036b80b9305b6814e03bff7"
+    },
+    "uv": "0.12.11"
+  }
+}

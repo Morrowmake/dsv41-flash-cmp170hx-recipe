@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 import native_build as nb
+import oci_layers
 import payload
 
 MARLIN = nb.MARLIN
@@ -70,13 +71,18 @@ def oci_layout(tmp_path, layers, platform_digest=None):
     return root, desc["digest"]
 
 
-def test_base_pins_match_both_builders():
+def test_base_pins_match_the_image_labels():
+    assert (oci_layers.BASE_INDEX, oci_layers.BASE_MANIFEST) == (nb.BASE_INDEX, nb.BASE_MANIFEST)
+
+
+def test_build_sh_pins_the_base_and_the_native_build():
+    """build.sh builds on the base the natives were built in, and its native pin is the shipped
+    manifest's sha256 and the one the release's assembly.json records."""
     build = (ROOT / "build.sh").read_text()
-    docker = (ROOT / "Dockerfile").read_text()
     assert re.search(r'^BASE=".*@' + nb.BASE_INDEX + '"$', build, re.M)
-    assert re.search(r"^ARG BASE=.*@" + nb.BASE_INDEX + "$", docker, re.M)
-    pin = re.search(r"^RELEASE_NATIVE_MANIFEST_SHA256='(.*)'$", build, re.M).group(1)
-    assert re.search(r"^ARG NATIVE_MANIFEST_SHA256=" + re.escape(pin) + "$", docker, re.M)
+    pin = re.search(r"^RELEASE_NATIVE_MANIFEST_SHA256='([0-9a-f]{64})'$", build, re.M).group(1)
+    assert sha((ROOT / "native-manifest.json").read_bytes()) == pin
+    assert json.loads((ROOT / "assembly.json").read_text())["native_manifest_sha256"] == pin
 
 
 def test_layers_apply_whiteouts_links_and_skip_devices(tmp_path):
@@ -93,6 +99,15 @@ def test_layers_apply_whiteouts_links_and_skip_devices(tmp_path):
     assert sorted(p.name for p in (root / "b").iterdir()) == ["new"]
     assert os.readlink(root / "l") == "a/y" and (root / "h").read_bytes() == b"y"
     assert not (root / "dev/null").exists()
+
+
+def test_layers_with_a_root_entry_apply(tmp_path):
+    """Layers packed with `tar -C <dir> .` (the builder's) name the root as "./"."""
+    root = tmp_path / "root"
+    root.mkdir()
+    data = layer([("./", "dir", None), ("./opt", "dir", None), ("./opt/x", "file", b"x")])
+    assert nb.apply_layer(root, io.BytesIO(data)) == 0
+    assert (root / "opt/x").read_bytes() == b"x"
 
 
 @pytest.mark.parametrize("name", ["../escape", "/abs/escape"])
@@ -129,6 +144,29 @@ def test_extract_base_checks_pin_and_layer_digests(tmp_path, monkeypatch):
     blob.write_bytes(bytes(data))
     with pytest.raises(Exception):
         nb.extract_base(oci, tmp_path / "rootfs2")
+
+
+def test_extract_base_takes_the_multi_platform_pull_of_the_pinned_base(tmp_path, monkeypatch):
+    """A `crane pull` of the base tag keeps the image index (4ff85952...) on top; the pinned linux/amd64
+    manifest is its entry. Native builds refused that layout (10-18) while the image build took it."""
+    raw = layer([("etc", "dir", None), ("etc/os-release", "file", b"ubuntu")])
+    oci, digest = oci_layout(tmp_path, [raw])
+    top = json.loads((oci / "index.json").read_text())["manifests"][0]
+    arm = dict(top, digest="sha256:" + "a" * 64, platform={"os": "linux", "architecture": "arm64"})
+    entry = dict(top, platform={"os": "linux", "architecture": "amd64"})
+    data = json.dumps({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json",
+                       "manifests": [arm, entry]}).encode()
+    (oci / "blobs/sha256" / sha(data)).write_bytes(data)
+    index = {"digest": "sha256:" + sha(data), "size": len(data),
+             "mediaType": "application/vnd.oci.image.index.v1+json"}
+    (oci / "index.json").write_text(json.dumps({"schemaVersion": 2, "manifests": [index]}))
+    monkeypatch.setattr(nb, "BASE_MANIFEST", digest)
+    with pytest.raises(nb.NativeError, match="not the pinned"):
+        nb.extract_base(oci, tmp_path / "rootfs0")      # an index that is not the pinned one
+    monkeypatch.setattr(nb, "BASE_INDEX", index["digest"])
+    base = nb.extract_base(oci, tmp_path / "rootfs")
+    assert (tmp_path / "rootfs/etc/os-release").read_bytes() == b"ubuntu"
+    assert base["manifest"] == digest and base["index"] == index["digest"]
 
 
 @pytest.mark.parametrize("option", ["VLLM_AMPERE_MARLIN_BUILD", "VLLM_BUILD_AMPERE_MARLIN"])
@@ -375,7 +413,9 @@ def exl3_fork(tmp_path, files):
     uv = tmp_path / "uv"
     uv.write_text(f"#!/bin/sh\necho {tmp_path / 'uv-cache'}\n")
     uv.chmod(0o755)
-    return ["build", "--repo", str(repo), "--commit", "HEAD", "--rootfs", str(rootfs),
+    constraints = tmp_path / "CONSTRAINTS"
+    constraints.write_text("# dependency lock\n")
+    return ["build", "--repo", str(repo), "--commit", "HEAD", "--rootfs", str(rootfs), "--constraints", str(constraints),
             "--work", str(tmp_path / "work"), "--out", str(tmp_path / "out"),
             "--uv", str(uv), "--jobs", "3"]
 
@@ -389,7 +429,7 @@ class Recorder:
 
     def __call__(self, script, **kw):
         Recorder.steps.append((script, kw))
-        for name in ("ampere_marlin", "exl3"):
+        for name in ("ampere_marlin", "exl3", "stable"):
             (self.build / name).mkdir(exist_ok=True)
             (self.build / name / "build.ninja").write_text("cxx = c++\n")
 
@@ -410,7 +450,6 @@ def test_exl3_build_follows_the_commit(tmp_path, monkeypatch, capsys, files, mod
     if mode == "cmake":
         # The CMake target needs its FetchContent sources and compiles nothing without them.
         assert "pass --fetchcontent" in err and not scripts
-        assert "cmake --build" in nb.exl3_script("cmake", 3)
         return
     assert "stop after the compile steps" in err
     venv, marlin = scripts[:2]
@@ -419,9 +458,7 @@ def test_exl3_build_follows_the_commit(tmp_path, monkeypatch, capsys, files, mod
         assert len(scripts) == 2
         return
     (exl3, kw), = Recorder.steps[2:]
-    assert exl3 == (f"cd {nb.SRC} && /opt/venv/bin/python {nb.EXL3_BUILDER} "
-                    f"--out {nb.BUILD}/out/vllm --build-dir {nb.BUILD}/exl3 --verbose")
-    assert kw == {"source_readonly": True} and "cmake" not in exl3
+    assert nb.EXL3_BUILDER in exl3 and kw == {"source_readonly": True} and "cmake" not in exl3
 
 
 def test_install_and_check_tree_take_the_standalone_exl3(fork):
@@ -474,3 +511,264 @@ def test_check_tree_refuses_an_extension_the_manifest_leaves_out(fork):
         assert nb.main(check) == 1
         (tree / name).unlink()
     assert nb.main(check) == 0
+
+
+# ------------------------------------------------------------------ --stable, FetchContent, --cache
+def fetchcontent_dir(tmp_path, names=("cutlass",)):
+    fc = tmp_path / "fetchcontent"
+    for name in names:
+        (fc / f"{name}-src").mkdir(parents=True, exist_ok=True)
+        (fc / f"{name}-src" / "CMakeLists.txt").write_text(name)
+        (fc / f"{name}-src" / nb.FETCH_MARKER).write_text(nb.dump({"repo": "r", "tag": "t", "submodules": None,
+                                                                   "head": "h-" + name}))
+    return fc
+
+
+def test_stable_builds_the_cmake_target_from_its_fetchcontent_sources(tmp_path, monkeypatch, capsys):
+    """NatUpstream 10-22: --stable adds the CMake target _C_stable_libtorch (configure once, build only it, writable
+    source for the generated Marlin kernels) after the fork natives, with the FetchContent sources it fetched."""
+    fc = fetchcontent_dir(tmp_path)
+    argv = exl3_fork(tmp_path, (nb.EXL3_BUILDER, nb.EXL3_SOURCE)) + ["--stable", "--fetchcontent", str(fc)]
+    fetched = []
+    monkeypatch.setattr(nb, "fetch_sources", lambda repo, commit, d: fetched.append((repo, commit, d)) or {})
+    monkeypatch.setattr(nb, "Namespace", Recorder)
+    monkeypatch.setattr(Recorder, "steps", [])
+    assert nb.main(argv) == 1
+    assert "stop after the compile steps" in capsys.readouterr().err
+    assert fetched and fetched[0][2] == fc
+    (venv, _), _marlin, _exl3, (stable, kw) = Recorder.steps
+    assert f"pip install cmake=={nb.CMAKE_VERSION}" in venv
+    assert kw == {"source_readonly": False}
+    assert f"--build {nb.BUILD}/stable --target _C_stable_libtorch -j 3" in stable
+    assert "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in stable and f"[ -f {nb.BUILD}/stable/CMakeCache.txt ] ||" in stable
+    assert f"{nb.BUILD}/out/{nb.STABLE}" in stable
+
+
+def test_moe_stable_builds_the_moe_target_in_the_same_cmake_tree(tmp_path, monkeypatch, capsys):
+    """Main 10-26: --moe-stable adds the CMake target _moe_C_stable_libtorch; with --stable both build in one
+    `cmake --build` of the same tree, each copied out to its wheel path."""
+    fc = fetchcontent_dir(tmp_path)
+    argv = exl3_fork(tmp_path, (nb.EXL3_BUILDER, nb.EXL3_SOURCE)) + ["--stable", "--moe-stable", "--fetchcontent",
+                                                                      str(fc)]
+    monkeypatch.setattr(nb, "fetch_sources", lambda repo, commit, d: {})
+    monkeypatch.setattr(nb, "Namespace", Recorder)
+    monkeypatch.setattr(Recorder, "steps", [])
+    assert nb.main(argv) == 1
+    (venv, _), _marlin, _exl3, (stable, kw) = Recorder.steps
+    assert f"pip install cmake=={nb.CMAKE_VERSION}" in venv and kw == {"source_readonly": False}
+    assert f"--build {nb.BUILD}/stable --target _C_stable_libtorch _moe_C_stable_libtorch -j 3" in stable
+    assert f"cp {nb.BUILD}/stable/_moe_C_stable_libtorch.abi3.so {nb.BUILD}/out/{nb.MOE_STABLE}" in stable
+    assert f"{nb.BUILD}/out/{nb.STABLE}" in stable
+    Recorder.steps.clear()
+    (tmp_path / "alone").mkdir()
+    alone = exl3_fork(tmp_path / "alone", (nb.EXL3_BUILDER, nb.EXL3_SOURCE)) + ["--moe-stable", "--fetchcontent",
+                                                                                 str(fc)]
+    assert nb.main(alone) == 1
+    stable = Recorder.steps[-1][0]
+    assert "--target _moe_C_stable_libtorch -j 3" in stable and nb.STABLE not in stable
+
+
+def test_stable_needs_fetchcontent(tmp_path, monkeypatch, capsys):
+    for flags in (["--stable"], ["--moe-stable"]):
+        (tmp_path / flags[0].strip("-")).mkdir()
+        argv = exl3_fork(tmp_path / flags[0].strip("-"), (nb.EXL3_BUILDER, nb.EXL3_SOURCE)) + flags
+        monkeypatch.setattr(nb, "Namespace", Recorder)
+        monkeypatch.setattr(Recorder, "steps", [])
+        assert nb.main(argv) == 1
+        target = {"--stable": "_C_stable_libtorch", "--moe-stable": "_moe_C_stable_libtorch"}[flags[0]]
+        assert (f"--stable/--moe-stable build the CMake targets {target}: pass --fetchcontent"
+                in capsys.readouterr().err)
+        assert not Recorder.steps
+
+
+def test_fetch_declarations_read_the_commit_s_git_sources(tmp_path):
+    repo = tmp_path / "decl"
+    files = {
+        "CMakeLists.txt": 'set(CUTLASS_REVISION "v4.7.1")\nif(X)\n  FetchContent_Declare(cutlass SOURCE_DIR ${D})\n'
+                          'else()\n  FetchContent_Declare(\n    cutlass\n    GIT_REPOSITORY https://h/cutlass.git\n'
+                          '    # keep in sync\n    GIT_TAG ${CUTLASS_REVISION}\n    GIT_SHALLOW TRUE\n  )\nendif()\n',
+        "cmake/external_projects/t.cmake": 'if(ROCM)\n  set(T_GIT "https://h/rocm.git")\nelse()\n'
+                                           '  set(T_GIT "https://h/t.git")\nendif()\nFetchContent_Populate(\n'
+                                           '  DeepGEMM SOURCE_DIR "${S}" GIT_REPOSITORY "${T_GIT}" GIT_TAG "abc"\n'
+                                           '  GIT_SUBMODULES "third-party/cutlass" "third-party/jit"\n'
+                                           '  GIT_PROGRESS TRUE)\n',
+        "cmake/cpu_extension.cmake": "FetchContent_Declare(oneDNN GIT_REPOSITORY https://h/o.git GIT_TAG v1)\n",
+    }
+    for rel, text in files.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text)
+    git(tmp_path, "init", "-q", str(repo))
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "c")
+    assert nb.fetch_declarations(repo, "HEAD") == {
+        "cutlass": {"repo": "https://h/cutlass.git", "tag": "v4.7.1", "submodules": None},
+        "deepgemm": {"repo": "https://h/t.git", "tag": "abc", "submodules": ["third-party/cutlass", "third-party/jit"]}}
+
+
+def test_fetch_sources_clone_the_declared_tag_once(tmp_path, monkeypatch):
+    upstream = tmp_path / "upstream"
+    git(tmp_path, "init", "-q", str(upstream))
+    (upstream / "include").mkdir()
+    (upstream / "include/x.h").write_text("v1\n")
+    git(upstream, "add", ".")
+    git(upstream, "commit", "-qm", "v1")
+    git(upstream, "tag", "v1")
+    head = git(upstream, "rev-parse", "HEAD")
+    dep = {"repo": f"file://{upstream}", "tag": "v1", "submodules": None}
+    monkeypatch.setattr(nb, "fetch_declarations", lambda repo, commit: {"lib": dep})
+    fc = tmp_path / "fc"
+    assert nb.fetch_sources(tmp_path, "HEAD", fc) == {"lib": head}
+    assert (fc / "lib-src/include/x.h").read_text() == "v1\n"
+    assert json.loads((fc / "lib-src" / nb.FETCH_MARKER).read_text()) == {**dep, "head": head}
+    calls = []
+    monkeypatch.setattr(nb, "run", lambda argv, **kw: calls.append(argv))
+    assert nb.fetch_sources(tmp_path, "HEAD", fc) == {"lib": head} and not calls   # kept: same declaration
+    deps = tmp_path / "deps"
+    assert nb.sync_sources(fc, deps) == {"lib": head} and (deps / "lib-src/include/x.h").is_file()
+    assert not (deps / "lib-src/.git").exists()
+
+
+class Completer(Recorder):
+    """Records the namespace steps and plays the build: writes each extension's output (and the CMake tree a
+    --stable build keeps, the venv), answers the probes."""
+    def __init__(self, rootfs, opt, build, env, log):
+        super().__init__(rootfs, opt, build, env, log)
+        self.opt = opt
+
+    def __call__(self, script, **kw):
+        if "uv venv" in script:
+            (self.opt / "venv").mkdir(exist_ok=True)
+        super().__call__(script, **kw)
+        for package in ("vllm", nb.PLUGIN_PACKAGE):
+            (self.build / "out" / package).mkdir(parents=True, exist_ok=True)
+        built = [rel for rel, target in nb.WHEEL_TARGETS.values() if f"/stable/{target}.abi3.so " in script]
+        for rel in (nb.MARLIN, nb.EXL3, nb.PLUGIN_MARLIN, nb.PLUGIN_EXL3) + tuple(built):
+            (self.build / "out" / rel).write_bytes(b"built " + rel.encode())
+        if built:
+            (self.build / "stable/CMakeCache.txt").write_text("kept\n")
+
+    def output(self, script):
+        return "{}"
+
+
+def test_cache_build_rewrites_only_changed_sources_and_keeps_venv_and_cmake_tree(tmp_path, monkeypatch, capsys):
+    """--cache: the second build reuses the base, venv and CMake tree, rewrites only the files the commit changes
+    (fresh mtime, so Ninja rebuilds what they reach) and names the commit the CMake tree was built at."""
+    fc = fetchcontent_dir(tmp_path)
+    argv = exl3_fork(tmp_path, (nb.EXL3_BUILDER, nb.EXL3_SOURCE))
+    cache = tmp_path / "cache"
+    i = argv.index("--work")
+    argv[i:i + 2] = ["--cache", str(cache)]
+    (tmp_path / "rootfs.base.json").write_text(json.dumps({"index": nb.BASE_INDEX, "manifest": nb.BASE_MANIFEST,
+                                                           "config": "sha256:c"}))
+    uv = tmp_path / "uv"
+    uv.write_text(f"#!/bin/sh\n[ \"$1\" = --version ] && echo uv 0.9.0 || echo {tmp_path / 'uv-cache'}\n")
+    repo = Path(argv[argv.index("--repo") + 1])
+    monkeypatch.setattr(nb, "fetch_sources", lambda *a: {})
+    monkeypatch.setattr(nb, "Namespace", Completer)
+    monkeypatch.setattr(Recorder, "steps", [])
+    stable = argv + ["--stable", "--moe-stable", "--fetchcontent", str(fc)]
+    first = git(repo, "rev-parse", "HEAD")
+    assert nb.main(stable) == 0
+    record = json.loads((tmp_path / "out/build-record.json").read_text())
+    assert record["cache"] == {"fresh": True, "changed_paths": None} and "python_venv_s" in record["timings"]
+    manifest = json.loads((tmp_path / "out/manifest.json").read_text())
+    assert set(manifest["artefacts"]) == {nb.MARLIN, nb.EXL3, nb.STABLE, nb.MOE_STABLE}
+    assert manifest["extensions"][nb.STABLE]["incremental_from"] is None
+    assert manifest["extensions"][nb.STABLE]["fetchcontent"] == {"cutlass": "h-cutlass"}
+    assert manifest["extensions"][nb.MOE_STABLE]["builder"] == "CMakeLists.txt target _moe_C_stable_libtorch"
+    src = cache / "opt/vllm-src"
+    os.utime(src / "cmake/u.cmake", (1, 1))
+    os.utime(src / "csrc/a.cu", (1, 1))
+    (repo / "csrc/a.cu").write_text("dynamic smem\n")
+    git(repo, "commit", "-qam", "change")
+    shutil.rmtree(tmp_path / "out")
+    Recorder.steps.clear()
+    assert nb.main(stable) == 0
+    record = json.loads((tmp_path / "out/build-record.json").read_text())
+    assert record["cache"] == {"fresh": False, "changed_paths": 1} and "python_venv_s" not in record["timings"]
+    assert (src / "csrc/a.cu").read_text() == "dynamic smem\n" and (src / "csrc/a.cu").stat().st_mtime > 1
+    assert (src / "cmake/u.cmake").stat().st_mtime == 1                     # untouched: not rebuilt
+    assert not any("uv pip install" in s for s, _ in Recorder.steps)
+    manifest = json.loads((tmp_path / "out/manifest.json").read_text())
+    assert manifest["extensions"][nb.STABLE]["incremental_from"] == first
+    assert manifest["extensions"][nb.MOE_STABLE]["incremental_from"] == first
+    assert json.loads((cache / "state.json").read_text())["stable_commit"] == git(repo, "rev-parse", "HEAD")
+    shutil.rmtree(tmp_path / "out")
+    (tmp_path / "CONSTRAINTS").write_text("# another lock\n")                 # another venv: start afresh
+    assert nb.main(argv) == 0
+    record = json.loads((tmp_path / "out/build-record.json").read_text())
+    assert record["cache"]["fresh"] is True and nb.STABLE not in record["artefacts"]
+
+
+def plugin_fork(tmp_path, builders=(nb.PLUGIN_MARLIN_BUILDER, nb.EXL3_BUILDER)):
+    """A plugin commit (the plugin branch's layout) and the build argv for it (exl3_fork's rootfs, uv, lock)."""
+    argv = exl3_fork(tmp_path, ())
+    repo = tmp_path / "pluginrepo"
+    for rel in ("csrc/exl3/q.cu", "csrc/ampere_marlin/m.cu", "vllm_sm80/__init__.py", "README.md", *builders):
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text("x")
+    git(tmp_path, "init", "-q", str(repo))
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "plugin")
+    argv[argv.index("--repo") + 1] = str(repo)
+    return argv + ["--plugin"], repo
+
+
+def test_plugin_build_builds_the_plugin_natives_from_csrc(tmp_path, monkeypatch, capsys):
+    argv, repo = plugin_fork(tmp_path)
+    monkeypatch.setattr(nb, "Namespace", Completer)
+    monkeypatch.setattr(Recorder, "steps", [])
+    (tmp_path / "rootfs.base.json").write_text(json.dumps({"index": nb.BASE_INDEX, "manifest": nb.BASE_MANIFEST,
+                                                           "config": "sha256:c"}))
+    uv = tmp_path / "uv"
+    uv.write_text(f"#!/bin/sh\n[ \"$1\" = --version ] && echo uv 0.9.0 || echo {tmp_path / 'uv-cache'}\n")
+    assert nb.main(argv) == 0, capsys.readouterr().err
+    manifest = json.loads((tmp_path / "out/manifest.json").read_text())
+    assert manifest["package"] == "vllm_sm80" and set(manifest["artefacts"]) == {nb.PLUGIN_MARLIN, nb.PLUGIN_EXL3}
+    assert manifest["source"]["inputs"] == {"csrc": git(repo, "rev-parse", "HEAD:csrc")}
+    assert manifest["extensions"][nb.PLUGIN_MARLIN]["builder"] == nb.PLUGIN_MARLIN_BUILDER
+    venv, marlin, exl3 = [script for script, _ in Recorder.steps]
+    assert "native-tools" not in venv
+    assert nb.PLUGIN_MARLIN_BUILDER in marlin and "--out /tmp/native-build/out/vllm_sm80 " in marlin
+    assert nb.EXL3_BUILDER in exl3 and "--out /tmp/native-build/out/vllm_sm80 " in exl3
+    for rel in (nb.PLUGIN_MARLIN, nb.PLUGIN_EXL3):
+        assert (tmp_path / "out" / rel).read_bytes() == b"built " + rel.encode()
+
+
+@pytest.mark.parametrize("missing", [nb.PLUGIN_MARLIN_BUILDER, nb.EXL3_BUILDER])
+def test_plugin_build_needs_both_plugin_builders(tmp_path, monkeypatch, capsys, missing):
+    argv, _ = plugin_fork(tmp_path, [b for b in (nb.PLUGIN_MARLIN_BUILDER, nb.EXL3_BUILDER) if b != missing])
+    monkeypatch.setattr(nb, "Namespace", Recorder)
+    monkeypatch.setattr(Recorder, "steps", [])
+    assert nb.main(argv) == 1
+    assert missing in capsys.readouterr().err and not Recorder.steps
+
+
+@pytest.mark.parametrize("option", [["--stable"], ["--moe-stable"], ["--no-marlin"], ["--fetchcontent", "/x"]])
+def test_plugin_build_takes_no_engine_options(tmp_path, option):
+    argv, _ = plugin_fork(tmp_path)
+    with pytest.raises(SystemExit) as stop:
+        nb.main(argv + option)
+    assert stop.value.code == 2
+
+
+def test_install_and_check_tree_of_plugin_natives(tmp_path):
+    _, repo = plugin_fork(tmp_path)
+    native = tmp_path / "pnative"
+    (native / "vllm_sm80").mkdir(parents=True)
+    (native / nb.PLUGIN_EXL3).write_bytes(b"exl3 bytes")
+    manifest = {"schema": 1, "package": "vllm_sm80",
+                "source": {"commit": git(repo, "rev-parse", "HEAD"), "commit_time": 0,
+                           "inputs": {"csrc": git(repo, "rev-parse", "HEAD:csrc")}},
+                "artefacts": {nb.PLUGIN_EXL3: {"sha256": sha(b"exl3 bytes"), "bytes": 10}}}
+    (native / "manifest.json").write_text(nb.dump(manifest))
+    assert nb.main(["install", "--native", str(native), "--tree", str(repo)]) == 0
+    assert (repo / nb.PLUGIN_EXL3).read_bytes() == b"exl3 bytes"
+    check = ["check-tree", "--manifest", str(native / "manifest.json"), "--tree", str(repo)]
+    assert nb.main(check) == 0
+    (repo / nb.PLUGIN_MARLIN).write_bytes(b"unlisted build")        # a plugin native the manifest leaves out
+    assert nb.main(check) == 1
+    (repo / nb.PLUGIN_MARLIN).unlink()
+    (repo / "csrc/exl3/q.cu").write_text("edited")                   # the plugin's one source input changed
+    assert nb.main(["install", "--native", str(native), "--tree", str(repo)]) == 1

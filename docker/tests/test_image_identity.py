@@ -1,41 +1,48 @@
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
+import tomllib
 
 import pytest
 
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
 import oci_layers as oci
-from test_release_image import PIN, base, publication_image
+from test_release_image import PIN, base, pin_of, publication_image
 
 TAG = "engine-" + PIN[:10]
 TARGET = "ghcr.io/morrowmake/vllm-cmp170hx:" + TAG
 
 
-def test_rootless_tag_ignores_recipe_version():
+def build_pins():
+    build = (ROOT / "build.sh").read_text()
+    return {k.lower(): v for k, v in re.findall(r"^RELEASE_([A-Z0-9_]+)='([^']*)'$", build, re.M)}
+
+
+def test_rootless_tag_is_the_queue_pin_and_ignores_recipe_version():
     prelude = (ROOT / "build.sh").read_text().split("\nPIP=", 1)[0]
     prelude = prelude.replace('HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
                               "HERE=" + shlex.quote(str(ROOT)))
     run = subprocess.run(["bash", "-c", prelude + '\nprintf "%s\n" "$TAG"\n'],
-                         env=dict(os.environ, VLLM_COMMIT=PIN, RELEASE="9.9.9"),
-                         capture_output=True, text=True)
+                         env=dict(os.environ, RELEASE="9.9.9"), capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
-    assert run.stdout.strip() == TAG
+    assert run.stdout.strip() == "engine-" + build_pins()["queue_commit"][:10]
 
 
-@pytest.mark.parametrize("commit", [PIN[:10], "g" * 40, "a" * 41])
-def test_rootless_rejects_non_full_engine_commit(tmp_path, commit):
-    out = tmp_path / "out"
-    run = subprocess.run(["bash", str(ROOT / "build.sh")],
-                         env=dict(os.environ, VLLM_COMMIT=commit, STEP="invalid", OUT=str(out)),
-                         capture_output=True, text=True)
-    assert run.returncode != 0
-    assert "full 40-character commit" in run.stderr
-    assert not out.exists()
+def test_build_sh_pins_are_the_recipe_s_and_the_assembly_s():
+    """build.sh's pins: the recipe contract's [pins] and the release's assembly.json."""
+    pins = build_pins()
+    for key in ("upstream_commit", "queue_commit", "plugin_commit"):
+        assert re.fullmatch(r"[0-9a-f]{40}", pins[key]), key
+    contract = tomllib.loads((ROOT.parent / "recipe.toml").read_text())["pins"]
+    record = json.loads((ROOT / "assembly.json").read_text())
+    for key in ("upstream_commit", "queue_commit", "plugin_commit", "native_build"):
+        assert pins[key] == contract[key] == record[key], key
+    assert pins["native_manifest_sha256"] == record["native_manifest_sha256"]
 
 
 @pytest.mark.parametrize("tag", ["1.7.2-" + PIN[:10], "engine-" + "b" * 10, TAG + "+build1"])
@@ -44,8 +51,9 @@ def test_assembly_rejects_unbound_tag_before_compression(tmp_path, tag):
     payload = tmp_path / "payload"
     for name in ("python", "dependencies", "native", "engine"):
         (payload / name).mkdir(parents=True)
+    b = base(tmp_path)
     with pytest.raises(ValueError, match="tag differs"):
-        oci.assemble(base(tmp_path), payload, out, PIN, tag, parallel=False)
+        oci.assemble(b, payload, out, PIN, tag, {}, pin_of(b), parallel=False)
     assert not out.exists()
 
 

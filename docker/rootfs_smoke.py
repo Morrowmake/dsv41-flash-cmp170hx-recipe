@@ -156,13 +156,15 @@ def check_tmp(rootfs):
     return "1777"
 
 
-def check_recipe_license(rootfs):
+def check_image_license(rootfs):
+    """/opt/image-tools carries the engine's licence (the assembled engine tree's LICENSE)
+    and the recipe's THIRD_PARTY_NOTICES, byte for byte."""
     recipe = Path(__file__).resolve().parents[1]
-    for name, source in (("LICENSE", recipe / "LICENSE"),
+    for name, source in (("LICENSE", rootfs / "opt/assembly/engine/LICENSE"),
                          ("THIRD_PARTY_NOTICES", recipe / "docker/THIRD_PARTY_NOTICES")):
         notice = rootfs / "opt/image-tools" / name
-        if not notice.is_file() or notice.read_bytes() != source.read_bytes():
-            raise ValueError(f"Image /opt/image-tools/{name} must match recipe notice bytes")
+        if not notice.is_file() or not source.is_file() or notice.read_bytes() != source.read_bytes():
+            raise ValueError(f"Image /opt/image-tools/{name} must match {source} bytes")
 
 
 def image_environment(config):
@@ -197,8 +199,8 @@ def main():
            ("rootfs", "config", "model", "result")):
         parser.error("rootfs, config, model and result are required")
     check_tmp(args.rootfs)
-    check_recipe_license(args.rootfs)
-    print("[image-rootfs] recipe LICENSE bytes match", flush=True)
+    check_image_license(args.rootfs)
+    print("[image-rootfs] engine LICENSE and notice bytes match", flush=True)
     enabled = os.environ.get("IMAGE_ROOTFS_CPU_SMOKE", "1") == "1"
     print("[image-rootfs-cpu] enabled=" + str(int(enabled)), flush=True)
     if not enabled:

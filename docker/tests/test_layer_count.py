@@ -25,21 +25,25 @@ def base(tmp_path, count):
     return root
 
 
-@pytest.mark.parametrize('base_count,layered,seed,passed', [
-    (119, True, False, True), (120, True, False, False),
-    (118, True, True, True), (119, True, True, False),
-    (122, False, True, True), (123, False, False, False)])
-def test_total_layers_before_compression(tmp_path, monkeypatch, capsys,
-                                         base_count, layered, seed, passed):
+def pin_of(base):
+    top = json.loads((base / 'index.json').read_text())['manifests'][0]['digest']
+    return 'sha256:' + '1' * 64, top
+
+
+@pytest.mark.parametrize('base_count,layered,passed', [
+    (119, True, True), (120, True, False), (122, False, True), (123, False, False)])
+def test_total_layers_before_compression(tmp_path, monkeypatch, capsys, base_count, layered, passed):
     monkeypatch.setenv('IMAGE_LAYER_COUNT_CHECK', '1')
     b = base(tmp_path, base_count)
     payload = tmp_path/'payload'
-    for name in ['python', 'dependencies', 'native', 'engine'] + (['cache-seed'] if seed else []):
+    for name in ['python', 'dependencies', 'native', 'engine']:
         (payload/name).mkdir(parents=True)
         (payload/name/'data').write_text(name)
     out = tmp_path/'out/oci'
+    env = {'PATH': '/usr/bin'}
     if passed:
-        oci.assemble(b, payload, out, 'a'*40, 'engine-' + 'a'*10, layered=layered, parallel=False)
+        oci.assemble(b, payload, out, 'a'*40, 'engine-' + 'a'*10, env, pin_of(b), layered=layered,
+                     parallel=False)
         manifest, config = oci.image(out)
         assert len(manifest['layers']) == len(config['rootfs']['diff_ids']) == 123
     else:
@@ -47,7 +51,7 @@ def test_total_layers_before_compression(tmp_path, monkeypatch, capsys,
             pytest.fail('compression ran before rejecting layer count')
         monkeypatch.setattr(oci, 'pack', forbidden_pack)
         with pytest.raises(ValueError, match='maximum is 123'):
-            oci.assemble(b, payload, out, 'a'*40, 'engine-' + 'a'*10, layered=layered)
+            oci.assemble(b, payload, out, 'a'*40, 'engine-' + 'a'*10, env, pin_of(b), layered=layered)
         assert not out.exists()
     assert f'count={123 if passed else 124} limit=123 check=1' in capsys.readouterr().out
 

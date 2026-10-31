@@ -1,0 +1,25 @@
+{
+  "created": "2026-10-31T01:07:06Z",
+  "native_build": "native-6a7c62b43c-t2.14.0",
+  "native_manifest_sha256": "59c9a4aee6024bd5772b46bab823c177f8977bdcc83b8e9f19d0cc3c01c06a3f",
+  "natives": {
+    "vllm_sm80/_ampere_marlin_C.abi3.so": "e4abeeae70b7f7edb3145f36d55e3a06dc153ed7d869d18b39b0cd9de7ff3805",
+    "vllm_sm80/_exl3_C.abi3.so": "18d04f81b8842aff96b51b0fb5b61ea2390e786925b0f00288538c6b7f120f19"
+  },
+  "plugin_commit": "0b34823c39ba0fd5c0d4690887882b4cfa69034e",
+  "plugin_distribution": {
+    "dist_info": "vllm_sm80-0.1.0.dist-info",
+    "name": "vllm-sm80",
+    "version": "0.1.0"
+  },
+  "queue_commit": "0af5991c009e0c3ff4181f026a8e7dffe1370b45",
+  "schema": "engine-assembly/1",
+  "torch": "2.14.0",
+  "upstream_commit": "330c5bffeeb48725c0502a351e8ead2b54bd81eb",
+  "wheel": {
+    "commit": "330c5bffeeb48725c0502a351e8ead2b54bd81eb",
+    "file": "vllm-0.32.1rc1.dev515+g330c5bffe-cp38-abi3-manylinux_2_28_x86_64.whl",
+    "sha256": "91ab870c88b285645b74f9e83ee680ff56ec22a5f682b0c7c957c5f403675245",
+    "url": "https://wheels.vllm.ai/330c5bffeeb48725c0502a351e8ead2b54bd81eb/vllm-0.32.1rc1.dev515%2Bg330c5bffe-cp38-abi3-manylinux_2_28_x86_64.whl"
+  }
+}

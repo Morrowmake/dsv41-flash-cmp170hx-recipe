@@ -51,12 +51,13 @@ unless the row says otherwise.
 | `VLLM_DEEPSEEK_V41_WO_A_GROUPED_GEMM` | `1` | the attention output's grouped FP8 projection as one grouped GEMM |
 | `VLLM_DEEPSEEK_V41_DRAFT_PROLOGUE_FUSED` | `1` | the DSpark drafter's context prologue as one kernel |
 | `VLLM_EXL3_MOE_V2` | `1` | EXL3 routed experts on the tensor cores for calls of 1 to 64 rows; changes the summation order |
-| `VLLM_EXL3_MOE_V2_FOLD` / `_RING` / `_DRAFT` | `1` | that kernel in three launches per call, its weight reads through a shared ring, and for the drafter's experts too; each needs `VLLM_EXL3_MOE_V2` |
+| `VLLM_EXL3_MOE_V2_FOLD` / `_RING` / `_DRAFT` | `1` | that kernel in three launches per call, its weight reads through a shared ring, and for the drafter's experts too; each needs `VLLM_EXL3_MOE_V2`; `_FOLD` does not apply to the rotated layers below |
 | `VLLM_DEEPSEEK_V41_MOE_PREFILL_TC` | `1` | EXL3 routed experts on the tensor cores for prefill calls of more than 64 rows |
 | `VLLM_EXL3_MOE_PREFILL_UNCHUNKED` | `1` | such a call of up to 2,048 rows as one launch sequence; needs `MOE_PREFILL_TC` |
-| `VLLM_EXL3_MOE_CHUNK_ROWS` | `2048` | routed-expert calls processed in chunks of up to 2,048 rows; the workspace is sized for it at startup |
+| `VLLM_EXL3_MOE_EXPERT_ROTATION` | `1` | each routed expert split by columns across the four cards, the chunks rotated per expert: each card holds the wide chunk of half of a layer's experts and the narrow chunk of the other half, so every card does the same routed work; each chunk's product is unchanged, and the cards' partial outputs are summed in the MoE all-reduce, which changes the summation order |
 | `VLLM_EXL3_EXPERTS_CONTIGUOUS` | `1` | each card's routed experts stored contiguously, fixed at loading |
-| `VLLM_SM80_TARGET_SHARD_ARGMAX` / `VLLM_DSPARK_SHARD_ARGMAX` | `1` | greedy sampling of the model and of the drafter by an argmax over each card's share of the vocabulary |
+| `VLLM_EXL3_FAST_LOAD` | `1` | the same weight bytes loaded faster: the checkpoint read ahead into the page cache while earlier weights are copied |
+| `VLLM_SM80_SHARD_ARGMAX` | `1` | greedy sampling of the model and of the drafter by an argmax over each card's share of the vocabulary; picks the token an argmax over the whole row picks |
 | `VLLM_DEEPSEEK_V41_ENGRAM_EARLY_GATHER` | `1` | Engram lookups started early on a second stream; needs full CUDA graphs for decode (the release's mode) |
 | `VLLM_DEEPSEEK_V41_ENGRAM_WKV_REPLICATED_PREFILL` | `1` | every card holds the whole Engram projection and projects prefill steps without gathering it |
 
@@ -73,11 +74,11 @@ Communication between the cards:
 | Switch | Release | What it does |
 |---|---|---|
 | `VLLM_CUSTOM_ALLREDUCE_PCIE_P2P` | `1` after a P2P pass, else `0` | the custom all-reduce over PCIe peer-to-peer |
-| `VLLM_CUSTOM_ALLREDUCE_FLAGS` / `_ALGO` / `_FLAGS_MAX_BYTES` | `1` / `2stage` / `524288` | its flags-in-data variant, two-stage, for messages up to 512 KiB |
-| `VLLM_HOST_ALLREDUCE` | `1` | a host-memory all-reduce for decode messages; stands aside while the peer-to-peer all-reduce serves |
-| `VLLM_DEEPSEEK_V41_WO_B_BF16_ALLREDUCE` / `_PREFILL_ALLREDUCE` | `1` | the attention output's partial sums all-reduced in BF16 instead of FP32, for decode and for prefill |
-| `VLLM_DEEPSEEK_V41_PREFILL_SPLIT_REDUCE` | `1` | prefill steps of 1,024 rows or more in two row slices, one slice's all-reduce beside the other's compute |
-| `VLLM_DEEPSEEK_V41_PREFILL_CE_ALLREDUCE` | `1` | prefill-sized all-reduces on a copy-engine ring instead of NCCL |
+| `VLLM_CUSTOM_ALLREDUCE_ALGO` | `2stage` | the custom all-reduce's two-stage kernel |
+| `VLLM_SM80_ALLREDUCE` | `1` | the engine's own all-reduce transports, each message on the one its size and the CUDA graph state select: a host-memory all-reduce that stands aside while peer-to-peer serves, a flags-in-data two-shot kernel inside the peer-to-peer custom all-reduce (bitwise the two-stage kernel), and a copy-engine ring for the large sums a layer owns on eager steps |
+| `VLLM_SM80_ALLREDUCE_COMPRESS` | `1` | the two-shot kernel's BF16 messages in a lossless compressed wire format; the same sums bit for bit; needs `VLLM_SM80_ALLREDUCE` |
+| `VLLM_SM80_ALLREDUCE_ROUND_ONCE` | `1` | the attention output's and the MoE output's partial sums all-reduced with one rounding to BF16 instead of one per step of the sum |
+| `VLLM_SM80_PREFILL_REDUCE_OVERLAP` | `1` | prefill steps of 1,024 rows or more in two row slices, one slice's all-reduces beside the other's compute; changes the summation order |
 | `NCCL_P2P_LEVEL` | `SYS` after a P2P pass, else `LOC` | NCCL over peer-to-peer |
 
 Memory and placement:
@@ -104,8 +105,6 @@ Scheduling:
 
 ## What the release leaves off
 
-These exist in the engine and stay at their defaults, which are off; they were
-not part of the measured configuration: `VLLM_DEEPSEEK_V41_MOE_ROUND_ONCE_ALLREDUCE`,
-`VLLM_ROUND_ONCE_ALLREDUCE_GROUPED`, an expert placement
-(`VLLM_EXL3_EXPERT_PLACEMENT`), and the diagnostic switches `VLLM_DEV_AB_SWITCH`
-and `VLLM_SM80_CAPTURE_DIR`. The launch does not set them.
+The diagnostic switch `VLLM_DEV_AB_SWITCH` exists in the engine and stays at
+its default, off; it was not part of the measured configuration. The launch
+does not set it.

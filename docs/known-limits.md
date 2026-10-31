@@ -2,8 +2,8 @@
 
 ## Status and roadmap
 
-- **First release: one layout.** Tensor-parallel 4 with whole routed experts
-  on each card, for x16 links.
+- **One layout.** Tensor-parallel 4 with every routed expert split across the
+  four cards, for x16 links.
 - **Optimisation continues**; every change ships with a switch and measured
   numbers.
 

@@ -36,8 +36,12 @@ def partition(path):
     parts = path.parts
     if parts[0] == "python":
         return "python"
-    if parts[0] == "vllm-src":
+    # /opt/vllm-src: a fork tree; /opt/assembly: an assembled engine (build.sh)
+    if parts[0] in ("vllm-src", "assembly"):
         return "native" if path.suffix == ".so" else "engine"
+    # /opt/build holds the engine tree's build record: it belongs to the engine
+    if parts[0] == "build":
+        return "engine"
     if parts[0] != "venv":
         raise ValueError("Unexpected runtime payload root")
     if (any(p.startswith(("vllm-", "vllm_sm80_plugin-", "__editable__.vllm", "__editable___vllm"))
