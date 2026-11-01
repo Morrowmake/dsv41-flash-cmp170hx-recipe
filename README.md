@@ -82,8 +82,8 @@ Use one or the other.
 Both download the checkpoints at the exact Hugging Face revisions this release
 was validated with.
 
-> **What this release is for.** One layout: **tensor-parallel 4** with whole
-> routed experts on each card, optimised for **PCIe x16 links** (cards with
+> **What this release is for.** One layout: **tensor-parallel 4** with every
+> routed expert split across the four cards, optimised for **PCIe x16 links** (cards with
 > the x16 capacitor modification). On cards limited to x4 links it runs, but
 > bus-bound and much slower; `./start.sh` warns when a card is narrower than
 > x16.
