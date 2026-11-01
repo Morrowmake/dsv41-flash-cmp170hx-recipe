@@ -75,14 +75,30 @@ def test_base_pins_match_the_image_labels():
     assert (oci_layers.BASE_INDEX, oci_layers.BASE_MANIFEST) == (nb.BASE_INDEX, nb.BASE_MANIFEST)
 
 
-def test_build_sh_pins_the_base_and_the_native_build():
-    """build.sh builds on the base the natives were built in, and its native pin is the shipped
-    manifest's sha256 and the one the release's assembly.json records."""
+def test_build_sh_pins_the_base_and_the_native_builds():
+    """build.sh builds on the base the natives were built in; its native pins are the shipped manifests' sha256 and
+    the ones the release's assembly.json records; the engine library's pinned build is a --stable build of the queue
+    alone, in a wheel builder native_build.py pins, and the record names its library and toolchain."""
     build = (ROOT / "build.sh").read_text()
+
+    def pin(name):
+        return re.search(rf"^RELEASE_{name}='([^']*)'$", build, re.M).group(1)
     assert re.search(r'^BASE=".*@' + nb.BASE_INDEX + '"$', build, re.M)
-    pin = re.search(r"^RELEASE_NATIVE_MANIFEST_SHA256='([0-9a-f]{64})'$", build, re.M).group(1)
-    assert sha((ROOT / "native-manifest.json").read_bytes()) == pin
-    assert json.loads((ROOT / "assembly.json").read_text())["native_manifest_sha256"] == pin
+    record = json.loads((ROOT / "assembly.json").read_text())
+    assert sha((ROOT / "native-manifest.json").read_bytes()) == pin("NATIVE_MANIFEST_SHA256") \
+        == record["native_manifest_sha256"]
+    data = (ROOT / "engine-native-manifest.json").read_bytes()
+    assert sha(data) == pin("ENGINE_NATIVE_MANIFEST_SHA256") == record["engine_native_manifest_sha256"]
+    assert pin("ENGINE_NATIVE_BUILD") == record["engine_native_build"]
+    manifest = json.loads(data)
+    assert manifest["source"]["commit"] == pin("QUEUE_COMMIT") == record["queue_commit"]
+    assert set(manifest["artefacts"]) == {nb.STABLE} and "package" not in manifest
+    assert record["engine_natives"] == {nb.STABLE: manifest["artefacts"][nb.STABLE]["sha256"]}
+    built = manifest["wheel_toolchain"]
+    assert nb.WHEEL_BUILDERS[built["recipe"]["image"]] == built["recipe"]["manifest"]
+    assert record["engine_native_toolchain"] == dict(built["recipe"], config=built["config"], nvcc=built["nvcc"],
+                                                     cxx=built["cxx"])
+
 
 
 def test_layers_apply_whiteouts_links_and_skip_devices(tmp_path):
@@ -524,51 +540,162 @@ def fetchcontent_dir(tmp_path, names=("cutlass",)):
     return fc
 
 
-def test_stable_builds_the_cmake_target_from_its_fetchcontent_sources(tmp_path, monkeypatch, capsys):
+IMAGE = "pytorch/manylinux2_28-builder:cuda13.0-78e737ad29420ffc4800e677c51e2a852caf8359"
+ARCHS = "7.5 8.0 8.6 8.9 9.0 10.0 12.0"
+# upstream 330c5bffee's .buildkite/release-pipeline.yaml, cut to its env and the CUDA wheel and image steps
+PIPELINE = f"""env:
+  CUDA_ARCH_X86: "{ARCHS}"
+  CUDA_ARCH_AARCH64: "8.0 8.7 8.9 9.0 10.0 11.0 12.0"
+
+steps:
+  - group: "Build CUDA 13.0 Python wheels"
+    steps:
+      - label: "Build wheel - aarch64 - CUDA 13.0"
+        commands:
+          - "DOCKER_BUILDKIT=1 docker build --build-arg max_jobs=16 --build-arg USE_SCCACHE=1 --build-arg CUDA_VERSION=13.0.2 --build-arg torch_cuda_arch_list=\\"${{CUDA_ARCH_AARCH64}}\\" --build-arg BUILD_BASE_IMAGE=pytorch/manylinuxaarch64-builder:cuda13.0-b8b5 --tag vllm-ci:build-image --target build --progress plain -f docker/Dockerfile ."
+      - label: "Build wheel - x86_64 - CUDA 13.0"
+        depends_on: ~
+        commands:
+          - "DOCKER_BUILDKIT=1 docker build --build-arg max_jobs=16 --build-arg USE_SCCACHE=1 --build-arg GIT_REPO_CHECK=1 --build-arg CUDA_VERSION=13.0.2 --build-arg torch_cuda_arch_list=\\"${{CUDA_ARCH_X86}}\\" --build-arg BUILD_BASE_IMAGE={IMAGE} --tag vllm-ci:build-image --target build --progress plain -f docker/Dockerfile ."
+          - "mkdir artifacts"
+  - label: "Build release image - x86_64 - CUDA 13.0"
+    commands:
+      - |
+        DOCKER_BUILDKIT=1 docker build \\
+          --build-arg BUILD_BASE_IMAGE={IMAGE} \\
+          --target vllm-openai -f docker/Dockerfile .
+"""
+WHEEL_ENV = ["PATH=/usr/local/cuda/bin:/opt/rh/gcc-toolset-13/root/usr/bin:/usr/bin:/bin", "LC_ALL=en_US.UTF-8"]
+
+
+def recipe_repo(tmp_path, pipeline=PIPELINE):
+    repo = tmp_path / "recipe"
+    (repo / ".buildkite").mkdir(parents=True)
+    (repo / nb.WHEEL_PIPELINE).write_text(pipeline)
+    git(tmp_path, "init", "-q", str(repo))
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "pipeline")
+    return repo
+
+
+def test_the_wheel_recipe_is_the_pipeline_s_x86_64_cuda_wheel_build(tmp_path):
+    """MatchedRebuild 10-31: a --stable rebuild in our CUDA 13.3 builder at TORCH_CUDA_ARCH_LIST 8.0 changed the SASS of
+    1387 of the wheel's 3537 sm_80 kernels for a host-only source change. The rebuild follows the wheel's own build: the
+    x86_64 CUDA wheel step's image (pinned by digest) and arch list (its env variable), never the aarch64 or image
+    steps'."""
+    repo = recipe_repo(tmp_path)
+    assert nb.wheel_recipe(repo, git(repo, "rev-parse", "HEAD")) == {
+        "image": IMAGE, "manifest": nb.WHEEL_BUILDERS[IMAGE], "torch_cuda_arch_list": ARCHS, "build_type": "Release",
+        "nvcc_threads": 8, "cmake": nb.CMAKE_VERSION, "source": "/workspace",
+        "build": "/workspace/build/temp.linux-x86_64-cpython-312", "fetchcontent": "/workspace/.deps"}
+    assert nb.main(["wheel-recipe", "--repo", str(repo), "--commit", "HEAD"]) == 0
+
+
+@pytest.mark.parametrize("old, new, why", [
+    (IMAGE + " --tag", "pytorch/manylinux2_28-builder:cuda13.0-other --tag", "which WHEEL_BUILDERS does not pin"),
+    ("--build-arg USE_SCCACHE=1 --build-arg GIT", "--build-arg GIT", "no USE_SCCACHE=1"),
+    ('  CUDA_ARCH_X86: "', '  CUDA_ARCH_OTHER: "', "is defined 0 times"),
+    ("Build wheel - x86_64 - CUDA 13.0", "Build wheel - x86_64 - CPU", "not one 'Build wheel - x86_64 - CUDA' step"),
+])
+def test_a_wheel_build_the_recipe_cannot_follow_is_refused(tmp_path, capsys, old, new, why):
+    assert old in PIPELINE
+    repo = recipe_repo(tmp_path, PIPELINE.replace(old, new, 1))
+    assert nb.main(["wheel-recipe", "--repo", str(repo), "--commit", "HEAD"]) == 1
+    assert why in capsys.readouterr().err
+
+
+def wheel_fork(tmp_path, monkeypatch, files=(nb.EXL3_BUILDER, nb.EXL3_SOURCE)):
+    """exl3_fork with upstream's pipeline, the wheel builder's extraction stubbed (its Env WHEEL_ENV), and the build
+    argv's --wheel-oci."""
+    argv = exl3_fork(tmp_path, files)
+    repo = Path(argv[argv.index("--repo") + 1])
+    (repo / ".buildkite").mkdir()
+    (repo / nb.WHEEL_PIPELINE).write_text(PIPELINE)
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "pipeline")
+    extracted = []
+
+    def extract(oci, rootfs, recipe):
+        rootfs.mkdir(parents=True)
+        extracted.append(oci)
+        return {"image": recipe["image"], "manifest": recipe["manifest"], "config": "sha256:wc", "env": WHEEL_ENV}
+    monkeypatch.setattr(nb, "extract_wheel_builder", extract)
+    monkeypatch.setattr(nb, "wheel_builder_oci", lambda directory, recipe: directory / recipe["manifest"].split(":")[1])
+    monkeypatch.setattr(nb, "fetch_sources", lambda *a: {})
+    return argv + ["--wheel-oci", str(tmp_path / "wheel-oci")], extracted
+
+
+class WheelRecorder(Recorder):
+    """Records the wheel builder's steps (with its rootfs and environment) and plays them: the CMake tree and the
+    installed libraries in the source it binds at /workspace."""
+    def __init__(self, rootfs, opt, build, env, log):
+        super().__init__(rootfs, opt, build, env, log)
+        self.rootfs, self.opt, self.env = rootfs, opt, env
+
+    def __call__(self, script, **kw):
+        Recorder.steps.append((script, dict(kw, rootfs=self.rootfs, env=self.env)))
+        src = self.opt / "vllm-src"
+        tree = nb.wheel_path(src, nb.WHEEL_BUILD)
+        tree.mkdir(parents=True, exist_ok=True)
+        (tree / "build.ninja").write_text("cxx = c++\n")
+        (tree / "CMakeCache.txt").write_text("kept\n")
+        for rel, target in nb.WHEEL_TARGETS.values():
+            if f"--component {target}\n" in script:
+                (nb.wheel_path(src, nb.WHEEL_LIB) / rel).parent.mkdir(parents=True, exist_ok=True)
+                (nb.wheel_path(src, nb.WHEEL_LIB) / rel).write_bytes(b"built " + rel.encode())
+
+
+def test_stable_builds_the_cmake_target_in_the_wheel_builder_as_upstream(tmp_path, monkeypatch, capsys):
     """NatUpstream 10-22: --stable adds the CMake target _C_stable_libtorch (configure once, build only it, writable
-    source for the generated Marlin kernels) after the fork natives, with the FetchContent sources it fetched."""
+    source for the generated Marlin kernels) after the fork natives, with the FetchContent sources it fetched.
+    MatchedRebuild 10-31: it builds the way upstream's wheel is built (test_the_wheel_recipe_...): in the pinned wheel
+    builder's root and environment, at the wheel's arch list, with setup.py's configure of /workspace and its install."""
     fc = fetchcontent_dir(tmp_path)
-    argv = exl3_fork(tmp_path, (nb.EXL3_BUILDER, nb.EXL3_SOURCE)) + ["--stable", "--fetchcontent", str(fc)]
-    fetched = []
-    monkeypatch.setattr(nb, "fetch_sources", lambda repo, commit, d: fetched.append((repo, commit, d)) or {})
+    argv, extracted = wheel_fork(tmp_path, monkeypatch)
     monkeypatch.setattr(nb, "Namespace", Recorder)
+    monkeypatch.setattr(nb, "WheelNamespace", WheelRecorder)
     monkeypatch.setattr(Recorder, "steps", [])
-    assert nb.main(argv) == 1
+    assert nb.main(argv + ["--stable", "--fetchcontent", str(fc)]) == 1
     assert "stop after the compile steps" in capsys.readouterr().err
-    assert fetched and fetched[0][2] == fc
-    (venv, _), _marlin, _exl3, (stable, kw) = Recorder.steps
-    assert f"pip install cmake=={nb.CMAKE_VERSION}" in venv
-    assert kw == {"source_readonly": False}
-    assert f"--build {nb.BUILD}/stable --target _C_stable_libtorch -j 3" in stable
-    assert "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in stable and f"[ -f {nb.BUILD}/stable/CMakeCache.txt ] ||" in stable
-    assert f"{nb.BUILD}/out/{nb.STABLE}" in stable
+    assert extracted == [tmp_path / "wheel-oci" / nb.WHEEL_BUILDERS[IMAGE].split(":")[1]]
+    (venv, _), (marlin, _), (exl3, _), (stable, kw) = Recorder.steps
+    assert f"pip install cmake=={nb.CMAKE_VERSION}" in venv and nb.MARLIN_BUILDER in marlin
+    assert kw["rootfs"] == tmp_path / "work/wheel-rootfs"
+    assert kw["env"]["TORCH_CUDA_ARCH_LIST"] == ARCHS and kw["env"]["NVCC_APPEND_FLAGS"] == "-objtemp"
+    assert kw["env"]["PATH"] == "/opt/venv/bin:/usr/local/cuda/bin:/opt/rh/gcc-toolset-13/root/usr/bin:/usr/bin:/bin"
+    assert kw["env"]["LC_ALL"] == "en_US.UTF-8" and "CUDA_HOME" not in kw["env"]
+    assert f"cd {nb.WHEEL_BUILD}\n[ -f CMakeCache.txt ] || /opt/native-tools/bin/cmake /workspace -G Ninja " \
+           "-DCMAKE_BUILD_TYPE=Release" in stable
+    for flag in ("-DFETCHCONTENT_BASE_DIR=/workspace/.deps", "-DNVCC_THREADS=8", "-DFETCHCONTENT_FULLY_DISCONNECTED=ON",
+                 "-DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc", "--target _C_stable_libtorch -j 1"):
+        assert flag in stable
+    assert f"--install . --prefix {nb.WHEEL_LIB} --component _C_stable_libtorch\n" in stable
+    # --jobs threads as setup.py spends MAX_JOBS: jobs // NVCC_THREADS compile jobs of up to 8 nvcc threads each
+    assert "-j 4\n" in nb.wheel_script(32, [(nb.STABLE, "_C_stable_libtorch")])
+    assert (tmp_path / "work/opt/vllm-src/.deps/cutlass-src/CMakeLists.txt").read_text() == "cutlass"
 
 
 def test_moe_stable_builds_the_moe_target_in_the_same_cmake_tree(tmp_path, monkeypatch, capsys):
     """Main 10-26: --moe-stable adds the CMake target _moe_C_stable_libtorch; with --stable both build in one
-    `cmake --build` of the same tree, each copied out to its wheel path."""
+    `cmake --build` of the same tree, each installed to its wheel path."""
     fc = fetchcontent_dir(tmp_path)
-    argv = exl3_fork(tmp_path, (nb.EXL3_BUILDER, nb.EXL3_SOURCE)) + ["--stable", "--moe-stable", "--fetchcontent",
-                                                                      str(fc)]
-    monkeypatch.setattr(nb, "fetch_sources", lambda repo, commit, d: {})
+    argv, _ = wheel_fork(tmp_path, monkeypatch)
     monkeypatch.setattr(nb, "Namespace", Recorder)
+    monkeypatch.setattr(nb, "WheelNamespace", WheelRecorder)
     monkeypatch.setattr(Recorder, "steps", [])
-    assert nb.main(argv) == 1
-    (venv, _), _marlin, _exl3, (stable, kw) = Recorder.steps
-    assert f"pip install cmake=={nb.CMAKE_VERSION}" in venv and kw == {"source_readonly": False}
-    assert f"--build {nb.BUILD}/stable --target _C_stable_libtorch _moe_C_stable_libtorch -j 3" in stable
-    assert f"cp {nb.BUILD}/stable/_moe_C_stable_libtorch.abi3.so {nb.BUILD}/out/{nb.MOE_STABLE}" in stable
-    assert f"{nb.BUILD}/out/{nb.STABLE}" in stable
+    assert nb.main(argv + ["--stable", "--moe-stable", "--fetchcontent", str(fc)]) == 1
+    stable = Recorder.steps[-1][0]
+    assert "--target _C_stable_libtorch _moe_C_stable_libtorch -j 1" in stable
+    assert "--component _moe_C_stable_libtorch\n" in stable and "--component _C_stable_libtorch\n" in stable
     Recorder.steps.clear()
     (tmp_path / "alone").mkdir()
-    alone = exl3_fork(tmp_path / "alone", (nb.EXL3_BUILDER, nb.EXL3_SOURCE)) + ["--moe-stable", "--fetchcontent",
-                                                                                 str(fc)]
-    assert nb.main(alone) == 1
+    alone, _ = wheel_fork(tmp_path / "alone", monkeypatch)
+    assert nb.main(alone + ["--moe-stable", "--fetchcontent", str(fc)]) == 1
     stable = Recorder.steps[-1][0]
-    assert "--target _moe_C_stable_libtorch -j 3" in stable and nb.STABLE not in stable
+    assert "--target _moe_C_stable_libtorch -j 1" in stable and "--component _C_stable_libtorch\n" not in stable
 
 
-def test_stable_needs_fetchcontent(tmp_path, monkeypatch, capsys):
+def test_stable_needs_fetchcontent_and_the_wheel_builder(tmp_path, monkeypatch, capsys):
     for flags in (["--stable"], ["--moe-stable"]):
         (tmp_path / flags[0].strip("-")).mkdir()
         argv = exl3_fork(tmp_path / flags[0].strip("-"), (nb.EXL3_BUILDER, nb.EXL3_SOURCE)) + flags
@@ -579,6 +706,22 @@ def test_stable_needs_fetchcontent(tmp_path, monkeypatch, capsys):
         assert (f"--stable/--moe-stable build the CMake targets {target}: pass --fetchcontent"
                 in capsys.readouterr().err)
         assert not Recorder.steps
+    (tmp_path / "oci").mkdir()
+    argv, _ = wheel_fork(tmp_path / "oci", monkeypatch)
+    argv = argv[:argv.index("--wheel-oci")]
+    assert nb.main(argv + ["--stable", "--fetchcontent", str(fetchcontent_dir(tmp_path))]) == 1
+    assert "pass --wheel-oci DIR" in capsys.readouterr().err and not Recorder.steps
+
+
+def test_the_wheel_builder_namespace_is_offline_with_our_venv_beside_its_compilers(tmp_path):
+    env = nb.wheel_environment(1700000000, 4, WHEEL_ENV, ARCHS)
+    assert not any(str(Path.home()) in v for v in env.values()) and env["SOURCE_DATE_EPOCH"] == "1700000000"
+    argv = nb.wheel_namespace_argv(tmp_path / "rootfs", tmp_path / "opt", env, ["true"])
+    assert "--clearenv" in argv and "--share-net" not in argv and nb.BUILD not in argv
+    binds = {argv[i + 2]: (argv[i], argv[i + 1]) for i, a in enumerate(argv) if a in ("--bind", "--ro-bind")}
+    assert binds == {"/": ("--ro-bind", str(tmp_path / "rootfs")),
+                     **{f"/opt/{n}": ("--ro-bind", str(tmp_path / "opt" / n)) for n in ("python", "venv", "native-tools")},
+                     "/workspace": ("--bind", str(tmp_path / "opt/vllm-src"))}
 
 
 def test_fetch_declarations_read_the_commit_s_git_sources(tmp_path):
@@ -629,8 +772,8 @@ def test_fetch_sources_clone_the_declared_tag_once(tmp_path, monkeypatch):
 
 
 class Completer(Recorder):
-    """Records the namespace steps and plays the build: writes each extension's output (and the CMake tree a
-    --stable build keeps, the venv), answers the probes."""
+    """Records the namespace steps and plays the build: writes each extension's output (and the venv), answers the
+    probes."""
     def __init__(self, rootfs, opt, build, env, log):
         super().__init__(rootfs, opt, build, env, log)
         self.opt = opt
@@ -641,21 +784,25 @@ class Completer(Recorder):
         super().__call__(script, **kw)
         for package in ("vllm", nb.PLUGIN_PACKAGE):
             (self.build / "out" / package).mkdir(parents=True, exist_ok=True)
-        built = [rel for rel, target in nb.WHEEL_TARGETS.values() if f"/stable/{target}.abi3.so " in script]
-        for rel in (nb.MARLIN, nb.EXL3, nb.PLUGIN_MARLIN, nb.PLUGIN_EXL3) + tuple(built):
+        for rel in (nb.MARLIN, nb.EXL3, nb.PLUGIN_MARLIN, nb.PLUGIN_EXL3):
             (self.build / "out" / rel).write_bytes(b"built " + rel.encode())
-        if built:
-            (self.build / "stable/CMakeCache.txt").write_text("kept\n")
 
     def output(self, script):
         return "{}"
 
 
+class WheelCompleter(WheelRecorder):
+    def output(self, script):
+        return "{}"
+
+
 def test_cache_build_rewrites_only_changed_sources_and_keeps_venv_and_cmake_tree(tmp_path, monkeypatch, capsys):
-    """--cache: the second build reuses the base, venv and CMake tree, rewrites only the files the commit changes
-    (fresh mtime, so Ninja rebuilds what they reach) and names the commit the CMake tree was built at."""
+    """--cache: the second build reuses the base, the wheel builder, the venv and the CMake tree, rewrites only the
+    files the commit changes (fresh mtime, so Ninja rebuilds what they reach) and names the commit the CMake tree was
+    built at. A commit of another wheel recipe configures a fresh CMake tree (a kept one keeps its configure's arch
+    list)."""
     fc = fetchcontent_dir(tmp_path)
-    argv = exl3_fork(tmp_path, (nb.EXL3_BUILDER, nb.EXL3_SOURCE))
+    argv, extracted = wheel_fork(tmp_path, monkeypatch)
     cache = tmp_path / "cache"
     i = argv.index("--work")
     argv[i:i + 2] = ["--cache", str(cache)]
@@ -664,8 +811,8 @@ def test_cache_build_rewrites_only_changed_sources_and_keeps_venv_and_cmake_tree
     uv = tmp_path / "uv"
     uv.write_text(f"#!/bin/sh\n[ \"$1\" = --version ] && echo uv 0.9.0 || echo {tmp_path / 'uv-cache'}\n")
     repo = Path(argv[argv.index("--repo") + 1])
-    monkeypatch.setattr(nb, "fetch_sources", lambda *a: {})
     monkeypatch.setattr(nb, "Namespace", Completer)
+    monkeypatch.setattr(nb, "WheelNamespace", WheelCompleter)
     monkeypatch.setattr(Recorder, "steps", [])
     stable = argv + ["--stable", "--moe-stable", "--fetchcontent", str(fc)]
     first = git(repo, "rev-parse", "HEAD")
@@ -677,6 +824,9 @@ def test_cache_build_rewrites_only_changed_sources_and_keeps_venv_and_cmake_tree
     assert manifest["extensions"][nb.STABLE]["incremental_from"] is None
     assert manifest["extensions"][nb.STABLE]["fetchcontent"] == {"cutlass": "h-cutlass"}
     assert manifest["extensions"][nb.MOE_STABLE]["builder"] == "CMakeLists.txt target _moe_C_stable_libtorch"
+    assert manifest["wheel_toolchain"]["recipe"]["image"] == IMAGE and manifest["wheel_toolchain"]["config"] == "sha256:wc"
+    assert manifest["wheel_toolchain"]["environment"]["TORCH_CUDA_ARCH_LIST"] == ARCHS
+    assert (tmp_path / "out" / nb.STABLE).read_bytes() == b"built " + nb.STABLE.encode()
     src = cache / "opt/vllm-src"
     os.utime(src / "cmake/u.cmake", (1, 1))
     os.utime(src / "csrc/a.cu", (1, 1))
@@ -689,11 +839,18 @@ def test_cache_build_rewrites_only_changed_sources_and_keeps_venv_and_cmake_tree
     assert record["cache"] == {"fresh": False, "changed_paths": 1} and "python_venv_s" not in record["timings"]
     assert (src / "csrc/a.cu").read_text() == "dynamic smem\n" and (src / "csrc/a.cu").stat().st_mtime > 1
     assert (src / "cmake/u.cmake").stat().st_mtime == 1                     # untouched: not rebuilt
-    assert not any("uv pip install" in s for s, _ in Recorder.steps)
+    assert not any("uv pip install" in s for s, _ in Recorder.steps) and len(extracted) == 1
     manifest = json.loads((tmp_path / "out/manifest.json").read_text())
     assert manifest["extensions"][nb.STABLE]["incremental_from"] == first
     assert manifest["extensions"][nb.MOE_STABLE]["incremental_from"] == first
     assert json.loads((cache / "state.json").read_text())["stable_commit"] == git(repo, "rev-parse", "HEAD")
+    shutil.rmtree(tmp_path / "out")
+    (repo / nb.WHEEL_PIPELINE).write_text(PIPELINE.replace(f'CUDA_ARCH_X86: "{ARCHS}"', 'CUDA_ARCH_X86: "8.0 9.0"'))
+    git(repo, "commit", "-qam", "another arch list")
+    assert nb.main(stable) == 0
+    manifest = json.loads((tmp_path / "out/manifest.json").read_text())
+    assert manifest["extensions"][nb.STABLE]["incremental_from"] is None
+    assert manifest["wheel_toolchain"]["recipe"]["torch_cuda_arch_list"] == "8.0 9.0"
     shutil.rmtree(tmp_path / "out")
     (tmp_path / "CONSTRAINTS").write_text("# another lock\n")                 # another venv: start afresh
     assert nb.main(argv) == 0
@@ -745,7 +902,8 @@ def test_plugin_build_needs_both_plugin_builders(tmp_path, monkeypatch, capsys, 
     assert missing in capsys.readouterr().err and not Recorder.steps
 
 
-@pytest.mark.parametrize("option", [["--stable"], ["--moe-stable"], ["--no-marlin"], ["--fetchcontent", "/x"]])
+@pytest.mark.parametrize("option", [["--stable"], ["--moe-stable"], ["--no-marlin"], ["--fetchcontent", "/x"],
+                                    ["--wheel-oci", "/x"]])
 def test_plugin_build_takes_no_engine_options(tmp_path, option):
     argv, _ = plugin_fork(tmp_path)
     with pytest.raises(SystemExit) as stop:

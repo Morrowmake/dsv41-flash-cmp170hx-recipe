@@ -5,10 +5,10 @@ model = "dsv41-flash"
 
 [pins]
 upstream_commit = "330c5bffeeb48725c0502a351e8ead2b54bd81eb"
-queue_commit = "0af5991c009e0c3ff4181f026a8e7dffe1370b45"
+queue_commit = "e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0"
 plugin_commit = "0b34823c39ba0fd5c0d4690887882b4cfa69034e"
 native_build = "native-6a7c62b43c-t2.14.0"
-image = "ghcr.io/morrowmake/vllm-cmp170hx@sha256:6e02917e575153f2f0d9415c8f528c7b895979db89ad1e5520065f8e0c53d35e"
+image = "ghcr.io/morrowmake/vllm-cmp170hx@sha256:32ae8b0e91a6264ba5cd20978d1a44460a8a5a2464641f377987414aa35071e2"
 checkpoint.export = { repo = "LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw", revision = "c178a01284fc5c0e859d8668cffaac81ca8f4042" }
 checkpoint.official = { repo = "deepseek-ai/DeepSeek-V4.1-Flash-1017", revision = "1bae0e1088993b9b82de08f59de5be5a34e42170" }
 
@@ -29,7 +29,7 @@ mounted = ["engram_placement.sh"]
 
 [files]
 "boot_check.py" = "sha256:dfb701cb83dbb5665e0361e7d3f283f28741fe48bb70c77632eef526e6118e5d"
-"docker-compose.yml" = "sha256:7c28ec92d9d6ff614aa3b3f6763b36773d968aa8e454622cbc057bb99a824b87"
+"docker-compose.yml" = "sha256:31f8cc59205db94377719477be7bc624fbce72302a6e781985fafd9ae35cfe0f"
 "docker/container.env" = "sha256:be8764f9ea41d3d6f0c26614e0f58b76cbc1579e2a5ee24221065ad5981f767d"
 "docker/entry.sh" = "sha256:b7e6f0daec1abdaf81b2925e2a10ef17cd1403e8a889f4f82bb2992f2ae8b75a"
 "docker/prepare.sh" = "sha256:7ae3946a55ec0f70e212dffd3d8ae6ee50995c3c7015e882d8ababca24d5d821"
@@ -45,7 +45,7 @@ mounted = ["engram_placement.sh"]
 "p2p_probe.cu" = "sha256:d1a4ce4e68f7a4634c8fe3eede22849b92a661a220e6a592b3469b655d8a4d12"
 "serve.sh" = "sha256:98c2a055ae76936692675512dfcafdce5b96f665ac38fc4570358d56ccf3c251"
 "smoke.sh" = "sha256:bbb4c53bb03ae7eb9426de803fc51b875dfc98959513c0602c0be755327e54e5"
-"start.sh" = "sha256:3e07cc6df65d3e68ca3c582326686851bff63331a94bb5a4587890d23267f0cd"
+"start.sh" = "sha256:a9ff3e5fcaaffb3b3a49b625ef7dfaa88e573d356e0f159885ede4beb639901c"
 "stop.sh" = "sha256:49197e87f916f5c0b334592cbb332688697bc7153f3458a7bdf31d7d4afdb9f4"
 "tools/check-env-match.py" = "sha256:63f9e8fd765a69c9950011c733c819c783cde44d0b9dabf12889ffc7e728c81c"
 "tools/env_effective.py" = "sha256:f1146dfbf13ed73a1e9182a9b4d5f56b55315ad07f1f8669e695b022ec755c19"

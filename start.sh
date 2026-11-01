@@ -144,10 +144,10 @@ load_env_defaults "$SCRIPT_DIR/.env"
 # everywhere at once). The commit pin is read by the release tools, not here.
 # shellcheck disable=SC2034
 RELEASE_UPSTREAM_COMMIT=330c5bffeeb48725c0502a351e8ead2b54bd81eb
-RELEASE_QUEUE_COMMIT=0af5991c009e0c3ff4181f026a8e7dffe1370b45
+RELEASE_QUEUE_COMMIT=e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0
 RELEASE_PLUGIN_COMMIT=0b34823c39ba0fd5c0d4690887882b4cfa69034e
 RELEASE_NATIVE_BUILD=native-6a7c62b43c-t2.14.0
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:6e02917e575153f2f0d9415c8f528c7b895979db89ad1e5520065f8e0c53d35e
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:32ae8b0e91a6264ba5cd20978d1a44460a8a5a2464641f377987414aa35071e2
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 # Where the checkpoints are: MODELS_DIR (a relative path is taken from this
 # checkout), models/ here by default. Each checkpoint is a plain directory in

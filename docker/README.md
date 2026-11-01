@@ -10,14 +10,17 @@ image, how to build it, and how to run it by hand with `docker run`.
 - **Engine:** an assembled engine in `/opt/assembly`, three pinned trees and
   nothing compiled in the image:
   - `engine/`: the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx)'s patch
-    queue at `0af5991c009e0c3ff4181f026a8e7dffe1370b45` (tag
+    queue at `e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0` (tag
     `dsv41-flash-recipe-1.0.1-queue`), on upstream `330c5bffee`, with the compiled
-    extensions of `330c5bffee`'s own nightly wheel;
+    extensions of `330c5bffee`'s own nightly wheel, except `vllm._C_stable_libtorch`,
+    rebuilt from the queue (it changes `csrc/quantization/marlin/marlin.cu`) the way
+    upstream builds that wheel;
   - `plugin/`: the sm_80 plugin `vllm_sm80` at
     `0b34823c39ba0fd5c0d4690887882b4cfa69034e` (tag `dsv41-flash-recipe-1.0.1-plugin`)
     with its compiled extensions: the sm_80 EXL3 library (`vllm_sm80._exl3_C`,
     required: the routed experts run on it) and the Marlin library;
-  - `assembly.json`: the pins, the wheel and the natives' sha256.
+  - `assembly.json`: the pins, the wheel, the rebuilt engine library and the natives'
+    sha256.
 
   Python 3.12 is `/opt/python`; `/opt/venv` holds the dependency lock (torch
   2.14.0, CUDA 13.0 build) and the engine installed from `/opt/assembly` without
@@ -50,12 +53,12 @@ image, how to build it, and how to run it by hand with `docker run`.
 Engine image tag:
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-0af5991c00-0b34823c39
+ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-e05403fdc3-0b34823c39
 ```
 
 The tag names all three pins (`engine-<upstream 10>-<queue 10>-<plugin 10>`), so
 a release that changes only the plugin gets a new tag. The OCI revision is the
-queue commit `0af5991c009e0c3ff4181f026a8e7dffe1370b45`; labels name all three
+queue commit `e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0`; labels name all three
 pins and the native build. Image tags identify engine source, independently of
 recipe release numbers. Publication requires validation and acceptance of the
 exact image digest.
@@ -65,7 +68,7 @@ exact image digest.
 [`build.sh`](build.sh) builds the image rootless and without a GPU or a Docker
 daemon: it prepares `/opt` on the host, splits it into deterministic layers and
 writes an OCI layout on the pinned base. Nothing of the engine is compiled into
-the image; it assembles three pinned inputs:
+the image; it assembles pinned inputs:
 
 - **The queue and the plugin** are fetched from the public fork by their release
   tags (`dsv41-flash-recipe-1.0.1-queue`, `dsv41-flash-recipe-1.0.1-plugin`); each
@@ -74,8 +77,26 @@ the image; it assembles three pinned inputs:
 - **The upstream wheel** of `RELEASE_UPSTREAM_COMMIT`, pinned by URL and sha256:
   its members under `vllm/` that neither the queue nor the upstream commit
   tracks (the compiled extensions and vendored trees) go into `engine/`, and its
-  `vllm/_version.py` names the queue commit. The build refuses a queue that
-  changes what those extensions are built from.
+  `vllm/_version.py` names the queue commit.
+- **The engine library the queue makes stale.** [`native_inputs.py`](native_inputs.py)
+  judges the queue's changes to the wheel's native inputs by the plugin's
+  native-input rules (`vllm_sm80/launch/data/native_inputs.toml`): this queue
+  changes an input of `vllm._C_stable_libtorch` alone. `docker/native_build.py
+  build --no-marlin --stable` rebuilds that library from the queue the way
+  upstream builds its x86_64 CUDA wheel: in upstream's wheel builder image
+  (`pytorch/manylinux2_28-builder:cuda13.0-78e737ad…`, pinned by manifest digest;
+  `BUILDER_OCI` names a local OCI layout of it, else `crane` pulls it), with its
+  compilers, upstream's architecture list and the source at `/workspace`; the
+  CMake FetchContent sources are cloned at their declared tags (`FETCHCONTENT`
+  names a directory of them). The rebuilt library replaces the wheel's copy. The
+  build must be the validated one in every recorded field (source trees,
+  toolchain, flags, FetchContent commits, torch): its `manifest.json` ships as
+  [`engine-native-manifest.json`](engine-native-manifest.json), pinned by
+  `RELEASE_ENGINE_NATIVE_MANIFEST_SHA256` and named by `RELEASE_ENGINE_NATIVE_BUILD`.
+  Its bytes differ from build to build (CUDA 13 numbers anonymous-namespace
+  symbols per build); its kernels do not. A queue that makes any other wheel
+  library stale is refused. The build takes about half an hour on 64 threads
+  (`ENGINE_NATIVE_JOBS`, about 1 GiB of RAM each).
 - **The plugin's compiled extensions** are built by `docker/native_build.py build
   --plugin` inside the pinned CUDA base image (rootless, with bubblewrap; fixed
   paths), from the plugin's `csrc/` alone. They must be the bytes of the validated
@@ -86,11 +107,12 @@ the image; it assembles three pinned inputs:
   --plugin` output instead.
 
 [`assembly.json`](assembly.json), the release's record of the assembly, is checked
-field by field against what was built and goes into the image unchanged. The
+field by field against what was built and goes into the image unchanged but for
+`engine_natives`, which names the rebuilt library's sha256. The
 venv is the dependency lock [`CONSTRAINTS`](CONSTRAINTS), checked after install.
 The build ends by checking that the OCI image's `/opt/assembly` holds exactly
-the assembled files (paths, sha256, modes, link targets) and the pinned natives
-(`native-check.json`).
+the assembled files (paths, sha256, modes, link targets), the pinned plugin natives
+(`native-check.json`) and the rebuilt engine library (`engine-native-check.json`).
 
 **The launch** comes from `SERVE_SH`, this repository's `serve.sh` by default. It
 is generated from the release settings, never written by hand; the builder
@@ -100,11 +122,14 @@ in `$OUT/serve-sh.sha256`.
 ```bash
 crane pull --platform linux/amd64 --format oci \
   nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87 /path/to/base-oci
-BASE_OCI=/path/to/base-oci STAGE=/path/to/new-owned-staging-directory OUT=/path/to/new-output \
-  ./docker/build.sh
+crane pull --format oci \
+  pytorch/manylinux2_28-builder:cuda13.0-78e737ad29420ffc4800e677c51e2a852caf8359@sha256:c8d8dba2124931732d1b073dec1d8999cd4d6c5ff7c5e77232137e77d9f00f6a \
+  /path/to/wheel-builder-oci
+BASE_OCI=/path/to/base-oci BUILDER_OCI=/path/to/wheel-builder-oci ENGINE_NATIVE_JOBS=64 \
+  STAGE=/path/to/new-owned-staging-directory OUT=/path/to/new-output ./docker/build.sh
 ```
 
-Without `BASE_OCI` it pulls the base with `crane`. `CLONE_FROM=/path/to/repo`
+Without `BASE_OCI` or `BUILDER_OCI` it pulls the image with `crane`. `CLONE_FROM=/path/to/repo`
 fetches the queue and the plugin from another Git repository (by the tags, or by
 the pinned commits where it has no such tags); `WHEEL=/path/to/wheel` uses a local
 copy of the wheel. Both are checked against the same pins.
@@ -120,13 +145,15 @@ troubleshooting kill switch is `IMAGE_LAYER_COUNT_CHECK=0` (default 1).
 Before layering, nothing in `/opt` may still name the staging path, a home
 directory or (reported for review in `hostname-hits.txt`) the build host.
 
-The build needs no GPU. It downloads Python, the wheel, torch and the runtime
-extras, so it takes a while and needs network access. The Docker builder
+The build needs no GPU. It downloads Python, the wheel, torch, the runtime
+extras and the engine library's CMake FetchContent sources, and compiles that
+library, so it takes a while and needs network access. The Docker builder
 (`Dockerfile`, `build-docker.sh`) builds a single-tree engine and does not build
 this release's assembled engine. See [release procedure](RELEASE.md) for the
 compression switches and publication. A rebuild produces a separate artifact; it
-does not revalidate the frozen digest. Validate the resulting provenance, layers
-and runtime before distributing any rebuilt image.
+does not revalidate the frozen digest: its rebuilt engine library, and so its
+native and engine layers and its digest, differ from the release image's. Validate
+the resulting provenance, layers and runtime before distributing any rebuilt image.
 
 ## Run it by hand
 
@@ -145,7 +172,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-0af5991c00-0b34823c39
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-e05403fdc3-0b34823c39
 MODELS=$PWD/models                  # the three directories ./download.sh made
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 MEM=$(awk '$1 == "MemTotal:" {print $2 "k"}' /proc/meminfo)   # limit, swap included: never swap

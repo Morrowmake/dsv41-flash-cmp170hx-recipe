@@ -1,24 +1,39 @@
 #!/usr/bin/env bash
 # Build the release image without a container runtime or GPU: an assembled engine.
-# Nothing of the engine is compiled here. /opt/assembly holds three pinned trees:
+# Nothing of the engine is compiled into the image. /opt/assembly holds three pinned trees:
 #   engine/   the fork's patch queue at RELEASE_QUEUE_COMMIT (tag QUEUE_TAG) with the
 #             compiled extensions of the upstream vLLM wheel of RELEASE_UPSTREAM_COMMIT
-#             (pinned by URL and sha256)
+#             (pinned by URL and sha256), but the one the queue makes stale (native_inputs.py:
+#             the plugin's native-input rules): vllm._C_stable_libtorch, rebuilt from the
+#             queue as upstream builds its wheel (native_build.py build --no-marlin --stable,
+#             in upstream's wheel builder image pinned by digest, the source at /workspace);
+#             the build must be the pinned one (engine-native-manifest.json,
+#             RELEASE_ENGINE_NATIVE_MANIFEST_SHA256, named by RELEASE_ENGINE_NATIVE_BUILD) in
+#             every field but the library's bytes. A queue that makes any other wheel
+#             library stale is refused.
 #   plugin/   the sm_80 plugin at RELEASE_PLUGIN_COMMIT (tag PLUGIN_TAG) with its natives
 #             (native_build.py build --plugin; they must be the pinned build's bytes,
 #             native-manifest.json, RELEASE_NATIVE_MANIFEST_SHA256) and its metadata
 #   assembly.json  the release's record of them (docker/assembly.json, checked against
-#             this build field by field)
+#             this build field by field; the image's names the rebuilt library's sha256)
 # beside Python in /opt/python and the dependency lock (CONSTRAINTS) in /opt/venv, where
 # venv_entry.py installs the engine from its own files (/opt/venv/bin/vllm, vllm's
 # version and entry points, the engine and plugin on the venv's path; nothing built);
 # the image runs with PYTHONPATH=/opt/assembly/engine:/opt/assembly/plugin and the Env
 # the plugin's launcher declares. Needs Linux x86_64, git, curl, uv, GNU tar, pigz,
-# bubblewrap (the native build), a CUDA 13.x toolkit (the P2P probe) and, without
-# BASE_OCI, crane.
+# bubblewrap (the native builds), a CUDA 13.x toolkit (the P2P probe), network access
+# (the engine library's CMake FetchContent sources) and, without BASE_OCI or BUILDER_OCI,
+# crane.
 # CLONE_FROM: a git repository to fetch the queue and plugin from instead of the public
 # fork (the release tags, or the pinned commits when it has no such tags).
 # NATIVE_DIR: a native_build.py build --plugin output to use instead of building it here.
+# NATIVE_JOBS (default 8): the plugin natives' build threads; ENGINE_NATIVE_JOBS (default
+# NATIVE_JOBS): the engine library's, ENGINE_NATIVE_JOBS / 8 compiles of up to 8 nvcc
+# threads each (about 1 GiB of RAM per thread).
+# BUILDER_OCI: a local OCI layout of upstream's wheel builder image (crane pull --format=oci
+# of the image native_build.py WHEEL_BUILDERS pins, by its digest); checked by that digest.
+# FETCHCONTENT: a directory of the engine library's CMake FetchContent sources
+# (<name>-src, cloned there when missing; default $STAGE/fetchcontent).
 # WHEEL: a local copy of the upstream wheel (checked by its pinned sha256).
 # STEP=relocate|assemble resumes a STAGE this script built. Choose a new OUT each time.
 # BASE_OCI permits assembly from a retained local base without registry access.
@@ -37,7 +52,7 @@ OUT="${OUT:-$HERE/out}"
 BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
 RELEASE_UPSTREAM_COMMIT='330c5bffeeb48725c0502a351e8ead2b54bd81eb'
-RELEASE_QUEUE_COMMIT='0af5991c009e0c3ff4181f026a8e7dffe1370b45'
+RELEASE_QUEUE_COMMIT='e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0'
 RELEASE_PLUGIN_COMMIT='0b34823c39ba0fd5c0d4690887882b4cfa69034e'
 RELEASE_NATIVE_BUILD='native-6a7c62b43c-t2.14.0'
 QUEUE_TAG="dsv41-flash-recipe-1.0.1-queue"
@@ -49,6 +64,12 @@ WHEEL_SHA256="91ab870c88b285645b74f9e83ee680ff56ec22a5f682b0c7c957c5f403675245"
 # sha256 of the validated native build's manifest.json (docker/native-manifest.json).
 RELEASE_NATIVE_MANIFEST_SHA256='59c9a4aee6024bd5772b46bab823c177f8977bdcc83b8e9f19d0cc3c01c06a3f'
 NATIVE_MANIFEST="$HERE/native-manifest.json"
+# The engine's rebuilt wheel library: the validated build's name and the sha256 of its
+# manifest.json (docker/engine-native-manifest.json); both empty when the queue makes no
+# wheel library stale.
+RELEASE_ENGINE_NATIVE_BUILD='engine-ea66503db898f2b3-t2.14.0'
+RELEASE_ENGINE_NATIVE_MANIFEST_SHA256='891f362f3c351e223447e4d62c345801cae15a55c6ccd1aed6653f351f7ed412'
+ENGINE_NATIVE_MANIFEST="$HERE/engine-native-manifest.json"
 RECORD="$HERE/assembly.json"
 SERVE_SH="${SERVE_SH:-$HERE/../serve.sh}"
 PYTHON_VERSION="3.12"
@@ -105,11 +126,25 @@ fetch_sources() {
     fetch_pin "$PLUGIN_TAG" "$RELEASE_PLUGIN_COMMIT"
     # The queue holds the upstream commit; its file list decides which wheel members are build products.
     fetch_pin "" "$RELEASE_UPSTREAM_COMMIT"
-    # The queue may not change what the wheel's extensions are built from (they would be stale).
-    local changed
-    changed="$(git -C "$SRC_GIT" diff --name-only "$RELEASE_UPSTREAM_COMMIT" "$RELEASE_QUEUE_COMMIT" \
-        -- CMakeLists.txt cmake csrc rust setup.py)"
-    [ -z "$changed" ] || { echo "the queue changes native inputs of the upstream wheel:" >&2; echo "$changed" >&2; exit 1; }
+    # The queue's changes to the wheel's native inputs: none, or inputs of the library
+    # build --stable rebuilds (the plugin's native-input rules); any other is refused.
+    python3 "$HERE/native_inputs.py" --src "$SRC_GIT" --upstream "$RELEASE_UPSTREAM_COMMIT" \
+        --queue "$RELEASE_QUEUE_COMMIT" --plugin "$RELEASE_PLUGIN_COMMIT" > "$OUT/native-inputs.json"
+    local rebuild
+    rebuild="$(python3 -c 'import json, sys; print(" ".join(json.load(open(sys.argv[1]))["rebuild"]))' \
+        "$OUT/native-inputs.json")"
+    case "$rebuild" in
+        "") [ -z "$RELEASE_ENGINE_NATIVE_MANIFEST_SHA256" ] || {
+                echo "the queue changes no input of a wheel library; RELEASE_ENGINE_NATIVE_MANIFEST_SHA256 pins a rebuild" >&2
+                exit 1; } ;;
+        --stable) [ -n "$RELEASE_ENGINE_NATIVE_MANIFEST_SHA256" ] || {
+                echo "the queue changes inputs of vllm._C_stable_libtorch and no engine native build is pinned:" >&2
+                cat "$OUT/native-inputs.json" >&2; exit 1; }
+            log "the queue changes inputs of vllm._C_stable_libtorch: $(cat "$OUT/native-inputs.json")" ;;
+        *) echo "the queue makes wheel libraries stale that this build does not rebuild (it rebuilds" \
+                "vllm._C_stable_libtorch alone, --stable):" >&2
+            cat "$OUT/native-inputs.json" >&2; exit 1 ;;
+    esac
     log "upstream wheel $WHEEL_FILE"
     mkdir -p "$STAGE/wheel"
     if [ -n "${WHEEL:-}" ]; then
@@ -132,6 +167,28 @@ natives() {
         --base-oci "$BASE_LAYOUT" --constraints "$CONSTRAINTS" --work "$STAGE/native-work" \
         --out "$STAGE/native" --jobs "${NATIVE_JOBS:-8}" --uv "$(command -v "$UV")"
     NATIVE_DIR="$STAGE/native"
+}
+
+# The engine's rebuilt wheel library, built here from the queue as upstream builds its
+# wheel: in upstream's wheel builder image, pinned by digest (BUILDER_OCI, else pulled
+# with crane into $OUT/wheel-oci), the source at /workspace.
+engine_native() {
+    [ -n "$RELEASE_ENGINE_NATIVE_MANIFEST_SHA256" ] || return 0
+    base_oci
+    local digest wheel_oci="$OUT/wheel-oci"
+    digest="$(python3 "$HERE/native_build.py" wheel-recipe --repo "$SRC_GIT" --commit "$RELEASE_QUEUE_COMMIT" \
+        | python3 -c 'import json, sys; print(json.load(sys.stdin)["manifest"].split(":", 1)[1])')"
+    if [ -n "${BUILDER_OCI:-}" ]; then
+        wheel_oci="$STAGE/wheel-oci"
+        mkdir -p "$wheel_oci"
+        ln -sfn "$(realpath "$BUILDER_OCI")" "$wheel_oci/$digest"
+    fi
+    log "the engine's vllm._C_stable_libtorch (native_build.py build --no-marlin --stable, in the wheel builder sha256:$digest)"
+    python3 "$HERE/native_build.py" build --no-marlin --stable --repo "$SRC_GIT" --commit "$RELEASE_QUEUE_COMMIT" \
+        --base-oci "$BASE_LAYOUT" --constraints "$CONSTRAINTS" --fetchcontent "${FETCHCONTENT:-$STAGE/fetchcontent}" \
+        --wheel-oci "$wheel_oci" --work "$STAGE/engine-native-work" --out "$STAGE/engine-native" \
+        --jobs "${ENGINE_NATIVE_JOBS:-${NATIVE_JOBS:-8}}" --uv "$(command -v "$UV")"
+    install -m 0644 "$STAGE/engine-native/manifest.json" "$OUT/engine-native-manifest.json"
 }
 
 # A commit's files into DIR, as a checkout writes them (modes, links), without Git data.
@@ -168,6 +225,12 @@ LOCK
     checkout "$RELEASE_QUEUE_COMMIT" "$tree/engine"
     python3 "$HERE/assembly.py" wheel --wheel "$STAGE/wheel/$WHEEL_FILE" --sha256 "$WHEEL_SHA256" \
         --tree "$tree/engine" --src "$SRC_GIT" --queue "$RELEASE_QUEUE_COMMIT" --upstream "$RELEASE_UPSTREAM_COMMIT"
+    if [ -n "$RELEASE_ENGINE_NATIVE_MANIFEST_SHA256" ]; then
+        log "engine: the rebuilt vllm._C_stable_libtorch in place of the wheel's"
+        python3 "$HERE/assembly.py" engine --tree "$tree/engine" --native "$STAGE/engine-native" \
+            --pinned-manifest "$ENGINE_NATIVE_MANIFEST" --manifest-sha256 "$RELEASE_ENGINE_NATIVE_MANIFEST_SHA256" \
+            --src "$SRC_GIT" --queue "$RELEASE_QUEUE_COMMIT"
+    fi
     log "plugin: the plugin's files, its natives (the pinned build's bytes) and its metadata"
     checkout "$RELEASE_PLUGIN_COMMIT" "$tree/plugin"
     python3 "$HERE/assembly.py" plugin --tree "$tree/plugin" --native "$NATIVE_DIR" \
@@ -177,8 +240,9 @@ LOCK
         --constraints "$CONSTRAINTS" --pinned-manifest "$NATIVE_MANIFEST" \
         --manifest-sha256 "$RELEASE_NATIVE_MANIFEST_SHA256" --upstream "$RELEASE_UPSTREAM_COMMIT" \
         --queue "$RELEASE_QUEUE_COMMIT" --plugin "$RELEASE_PLUGIN_COMMIT" --native-build "$RELEASE_NATIVE_BUILD" \
-        --wheel-file "$WHEEL_FILE" --wheel-url "$WHEEL_URL" --wheel-sha256 "$WHEEL_SHA256"
-    install -m 0664 "$RECORD" "$tree/assembly.json"
+        --wheel-file "$WHEEL_FILE" --wheel-url "$WHEEL_URL" --wheel-sha256 "$WHEEL_SHA256" \
+        --engine-native-build "$RELEASE_ENGINE_NATIVE_BUILD" --engine-pinned-manifest "$ENGINE_NATIVE_MANIFEST" \
+        --engine-manifest-sha256 "$RELEASE_ENGINE_NATIVE_MANIFEST_SHA256" --out "$tree/assembly.json"
     python3 "$HERE/assembly.py" files --opt "$STAGE/opt" --src "$SRC_GIT" --queue "$RELEASE_QUEUE_COMMIT" \
         --plugin "$RELEASE_PLUGIN_COMMIT" --out "$FILES"
     log "the venv's engine install: /opt/venv/bin/vllm, vllm's distribution, the engine on the venv's path"
@@ -276,6 +340,11 @@ assemble() {
     python3 "$HERE/assembly.py" check --files "$FILES" --oci "$OUT/oci"
     python3 "$HERE/native_build.py" check-oci --oci "$OUT/oci" --manifest "$NATIVE_MANIFEST" \
         --prefix /opt/assembly/plugin | tee "$OUT/native-check.json"
+    if [ -n "$RELEASE_ENGINE_NATIVE_MANIFEST_SHA256" ]; then
+        # the rebuilt library is this build's (engine-native-manifest.json pins every other field)
+        python3 "$HERE/native_build.py" check-oci --oci "$OUT/oci" --manifest "$STAGE/engine-native/manifest.json" \
+            --prefix /opt/assembly/engine | tee "$OUT/engine-native-check.json"
+    fi
     log "local OCI $(cat "$OUT/digest.txt") complete (not pushed)"
 }
 
@@ -285,7 +354,7 @@ case "${STEP:-all}" in
     all)
         require_serve
         rm -rf "$STAGE"; mkdir -p "$STAGE/opt"
-        fetch_sources; natives; build_tree; relocate; layer; assemble ;;
+        fetch_sources; natives; engine_native; build_tree; relocate; layer; assemble ;;
     relocate) relocate; layer; assemble ;;
     assemble) layer; assemble ;;
     *) echo "unknown STEP" >&2; exit 2 ;;

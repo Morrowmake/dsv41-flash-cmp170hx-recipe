@@ -22,9 +22,23 @@ dependencies, native libraries (every `.so` of `/opt/assembly`) and the engine
 build: `native_build.py build --plugin` makes them in the pinned base image (in
 `build.sh`, or beforehand with `NATIVE_DIR`), and they must be the validated
 build's bytes (`native-manifest.json`, pinned by
-`RELEASE_NATIVE_MANIFEST_SHA256` and named by `RELEASE_NATIVE_BUILD`). `build.sh`
+`RELEASE_NATIVE_MANIFEST_SHA256` and named by `RELEASE_NATIVE_BUILD`).
+When the queue changes native inputs of the upstream wheel (`native_inputs.py`,
+by the plugin's native-input rules), `build.sh` rebuilds the one library they
+feed, `vllm._C_stable_libtorch` (`native_build.py build --no-marlin --stable`
+from the queue commit, in upstream's wheel builder image pulled by digest or
+`BUILDER_OCI`, the source at `/workspace`), and puts it in `engine/` in place of
+the wheel's; any other stale wheel library is refused. Its manifest must be the
+validated build's (`engine-native-manifest.json`, pinned by
+`RELEASE_ENGINE_NATIVE_MANIFEST_SHA256` and named by
+`RELEASE_ENGINE_NATIVE_BUILD`) in every field but the library's bytes, which
+CUDA 13 makes differ per build (anonymous-namespace symbol numbers; the kernels
+are the same), so the image's `assembly.json` names the rebuilt library's sha256.
+The validated image holds the validated build's library; compare a rebuilt one
+with it per kernel (SASS) before relying on it. `build.sh`
 finishes by checking `/opt/assembly` in the assembled image against the files it
-assembled and with `native_build.py check-oci`.
+assembled and with `native_build.py check-oci` (the plugin's natives against
+`native-manifest.json`, the engine library against its build's manifest).
 Native libraries reuse a layer only when their bytes are identical.
 `layers.json` records every compressed size and digest. `IMAGE_LAYERED=1` and
 `IMAGE_PARALLEL_COMPRESSION=1` are the defaults; set either to `0` to disable.
@@ -34,12 +48,14 @@ compressed blobs directly, so crane does not recompress them at publication.
 Keep the same compression settings to reuse layer digests.
 
 ```bash
-CUDA_VISIBLE_DEVICES="" BASE_OCI=/path/to/base-oci \
-  STAGE=/path/to/new-stage OUT=/path/to/new-output ./docker/build.sh
+CUDA_VISIBLE_DEVICES="" BASE_OCI=/path/to/base-oci BUILDER_OCI=/path/to/wheel-builder-oci \
+  ENGINE_NATIVE_JOBS=64 STAGE=/path/to/new-stage OUT=/path/to/new-output ./docker/build.sh
 ```
 
-`STEP=assemble` packages an already built staging tree; `BASE_OCI` can name
-an audited retained base for offline assembly. Neither changes the pins.
+`STEP=assemble` packages an already built staging tree; `BASE_OCI` and
+`BUILDER_OCI` can name audited retained images for building without registry
+access (the engine library's FetchContent sources still need the network, or
+`FETCHCONTENT` naming a directory of them). None changes the pins.
 `CLONE_FROM` fetches the queue and the plugin from another repository (by the
 release tags, or the pinned commits); the fetched commits must be the pins. No
 Git data enters the image. The Docker path (`Dockerfile`) builds a single-tree

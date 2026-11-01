@@ -1,5 +1,27 @@
 {
-  "created": "2026-10-31T01:07:06Z",
+  "created": "2026-10-31T23:45:41Z",
+  "engine_native_build": "engine-ea66503db898f2b3-t2.14.0",
+  "engine_native_manifest_sha256": "891f362f3c351e223447e4d62c345801cae15a55c6ccd1aed6653f351f7ed412",
+  "engine_native_toolchain": {
+    "build": "/workspace/build/temp.linux-x86_64-cpython-312",
+    "build_type": "Release",
+    "cmake": "3.31.10",
+    "config": "sha256:35e98d7b0d56b6db47fe07e6af5a1fa5911f7dea9396e314e4f6835f5d8938c1",
+    "cxx": "c++ (GCC) 13.3.1 20240611 (Red Hat 13.3.1-2)",
+    "fetchcontent": "/workspace/.deps",
+    "image": "pytorch/manylinux2_28-builder:cuda13.0-78e737ad29420ffc4800e677c51e2a852caf8359",
+    "manifest": "sha256:c8d8dba2124931732d1b073dec1d8999cd4d6c5ff7c5e77232137e77d9f00f6a",
+    "nvcc": [
+      "Cuda compilation tools, release 13.0, V13.0.88",
+      "Build cuda_13.0.r13.0/compiler.36424714_0"
+    ],
+    "nvcc_threads": 8,
+    "source": "/workspace",
+    "torch_cuda_arch_list": "7.5 8.0 8.6 8.9 9.0 10.0 12.0"
+  },
+  "engine_natives": {
+    "vllm/_C_stable_libtorch.abi3.so": "997cc30a8a80ad199296b0e037adbc52adbc34172796dc546d9698608840b0d4"
+  },
   "native_build": "native-6a7c62b43c-t2.14.0",
   "native_manifest_sha256": "59c9a4aee6024bd5772b46bab823c177f8977bdcc83b8e9f19d0cc3c01c06a3f",
   "natives": {
@@ -12,7 +34,7 @@
     "name": "vllm-sm80",
     "version": "0.1.0"
   },
-  "queue_commit": "0af5991c009e0c3ff4181f026a8e7dffe1370b45",
+  "queue_commit": "e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0",
   "schema": "engine-assembly/1",
   "torch": "2.14.0",
   "upstream_commit": "330c5bffeeb48725c0502a351e8ead2b54bd81eb",

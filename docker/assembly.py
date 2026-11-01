@@ -5,10 +5,14 @@
             member under vllm/ that neither the queue commit nor the wheel's own commit
             tracks (compiled modules, vendored trees), and vllm/_version.py naming the
             queue commit
+  engine    the wheel library the queue makes stale (native_inputs.py), rebuilt from the
+            queue by native_build.py build --no-marlin --stable as upstream builds its
+            wheel, over the wheel's copy in engine/ (checked against the pinned build)
   plugin    the plugin tree's natives (NATIVE_DIR, checked against the pinned native
             build) and its metadata-only vllm_sm80-<version>.dist-info, derived from the
             plugin commit's pyproject.toml alone
-  record    the release's assembly.json, checked field by field against what was built
+  record    the release's assembly.json, checked field by field against what was built,
+            written into the image with the rebuilt engine library's sha256
   files     record every file of /opt/assembly (sha256, mode, link target) as built
   check     the stage (--opt) or an OCI image (--oci) holds exactly those files
   env       the image's Env: the plugin launcher's [runtime.container.image_env]
@@ -44,6 +48,8 @@ PINS = ("upstream_commit", "queue_commit", "plugin_commit")
 # was built from (a commit with the same csrc tree) and the builder's own bytes.
 PROVENANCE = {("source", "commit"), ("source", "commit_time"), ("environment", "SOURCE_DATE_EPOCH"),
               ("builder_sha256",)}
+# The engine's source inputs a wheel-library build records (native_build.py SOURCE_INPUTS).
+ENGINE_INPUTS = ("CMakeLists.txt", "cmake", "csrc")
 
 
 class Refusal(Exception):
@@ -123,11 +129,51 @@ def leaves(value, prefix=()):
         yield prefix, value
 
 
-def native_differences(built, pinned):
-    """The manifest fields a rebuild differs in from the pinned build, provenance aside."""
+def native_differences(built, pinned, allowed=frozenset()):
+    """The manifest fields a rebuild differs in from the pinned build, provenance and ALLOWED aside."""
     a, b = dict(leaves(built)), dict(leaves(pinned))
     return sorted(".".join(k) for k in a.keys() | b.keys()
-                  if a.get(k) != b.get(k) and not any(k[:len(p)] == p for p in PROVENANCE))
+                  if a.get(k) != b.get(k) and not any(k[:len(p)] == p for p in PROVENANCE | allowed))
+
+
+def engine(a):
+    """The engine's rebuilt wheel library (--native: native_build.py build --no-marlin --stable of the queue)
+    over the wheel's copy in the engine tree. Its manifest must be the pinned build's in every field but where and
+    when it was built and the library's bytes: CUDA 13 numbers anonymous-namespace symbols per build, so two builds
+    of one source are never byte-identical (their kernels are)."""
+    sys.path.insert(0, str(HERE))
+    from native_build import STABLE, variants  # noqa: PLC0415
+    tree, native = Path(a.tree), Path(a.native)
+    pinned_path = Path(a.pinned_manifest)
+    if sha256_file(pinned_path) != a.manifest_sha256:
+        raise Refusal(f"{pinned_path} is not the pinned engine native manifest {a.manifest_sha256}")
+    pinned = json.loads(pinned_path.read_text())
+    built = json.loads((native / "manifest.json").read_text())
+    inputs = {name: git(a.src, "rev-parse", f"{a.queue}:{name}").strip() for name in ENGINE_INPUTS}
+    for doc, where in ((built, native / "manifest.json"), (pinned, pinned_path)):
+        if doc.get("package") or "wheel_toolchain" not in doc or set(doc["artefacts"]) != {STABLE}:
+            raise Refusal(f"{where}: not a build of {STABLE} alone (native_build.py build --no-marlin --stable)")
+        if doc["source"]["inputs"] != inputs:
+            raise Refusal(f"{where}: built from {doc['source']['inputs']}, not the queue's {inputs}")
+    differences = native_differences(built, pinned, {("artefacts", STABLE, "sha256"), ("artefacts", STABLE, "bytes")})
+    if differences:
+        raise Refusal(f"{STABLE} was not built as the pinned build; manifest fields that differ: "
+                      + ", ".join(differences))
+    data = (native / STABLE).read_bytes()
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != built["artefacts"][STABLE]["sha256"]:
+        raise Refusal(f"{native / STABLE} differs from its manifest")
+    target = tree / STABLE
+    if not target.is_file() or target.is_symlink():
+        raise Refusal(f"{target}: the wheel holds no {STABLE} to replace")
+    shadows = [str(p) for p in variants(target) if p.exists() or p.is_symlink()]
+    if shadows:
+        raise Refusal(f"other builds of {STABLE} in the engine tree: {shadows}")
+    write(target, data, 0o755)
+    validated = pinned["artefacts"][STABLE]["sha256"]
+    print(f"[assembly] {STABLE} rebuilt from the queue into {tree}: sha256 {actual} ("
+          + ("the validated build's bytes)" if actual == validated else f"the validated build's is {validated}; "
+             "the manifests agree in every other field)"))
 
 
 def plugin_metadata(plugin):
@@ -201,10 +247,21 @@ def plugin(a):
 
 
 # ---------------------------------------------------------------- assembly.json
+def engine_native_build(src, queue, rebuild, constraints, recipe, torch):
+    """The engine native build's name: engine-<16 hex>-t<torch>, the hash of what it is built from (the queue's native
+    source trees, the rebuilt native globs REBUILD, the dependency lock) and how (RECIPE: the queue's wheel recipe)."""
+    inputs = {name: git(src, "rev-parse", f"{queue}:{name}").strip() for name in ENGINE_INPUTS}
+    key = json.dumps(dict(inputs=inputs, rebuild=sorted(rebuild), constraints=sha256_file(constraints),
+                          wheel_recipe=recipe), sort_keys=True)
+    return f"engine-{hashlib.sha256(key.encode()).hexdigest()[:16]}-t{torch}"
+
+
 def record(a):
-    """The release's assembly.json against the build: every field but its creation time."""
+    """The release's assembly.json against the build: every field but its creation time. It goes into the image
+    (--out) with engine_natives naming the rebuilt engine library this build holds."""
     doc = json.loads(Path(a.record).read_text())
     plugin_tree = Path(a.opt) / "assembly/plugin"
+    engine_tree = Path(a.opt) / "assembly/engine"
     pinned = json.loads(Path(a.pinned_manifest).read_text())
     torch = lock_torch(a.constraints)
     csrc = git(a.src, "rev-parse", f"{a.plugin}:csrc").strip()
@@ -217,16 +274,49 @@ def record(a):
         "natives": {rel: sha256_file(plugin_tree / rel) for rel in sorted(pinned["artefacts"])},
         "plugin_distribution": {"name": PLUGIN_DISTRIBUTION, "version": version, "dist_info": dist},
         "wheel": {"commit": a.upstream, "file": a.wheel_file, "url": a.wheel_url, "sha256": a.wheel_sha256},
+        "engine_native_build": None, "engine_native_manifest_sha256": None, "engine_natives": {},
+        "engine_native_toolchain": None,
     }
     if a.native_build != expected["native_build"]:
         raise Refusal(f"RELEASE_NATIVE_BUILD {a.native_build} is not {expected['native_build']} "
                       f"(the plugin's csrc tree and the lock's torch)")
+    if a.engine_manifest_sha256:
+        sys.path.insert(0, str(HERE))
+        import native_inputs  # noqa: PLC0415
+        if sha256_file(a.engine_pinned_manifest) != a.engine_manifest_sha256:
+            raise Refusal(f"{a.engine_pinned_manifest} is not the pinned engine native manifest "
+                          f"{a.engine_manifest_sha256}")
+        engine_pinned = json.loads(Path(a.engine_pinned_manifest).read_text())
+        built = engine_pinned["wheel_toolchain"]
+        try:
+            options = native_inputs.rebuild_options(native_inputs.load_rules(a.src, a.plugin))
+        except native_inputs.Refusal as error:
+            raise Refusal(str(error)) from None
+        rebuild = [glob for glob, option in options.items() if option == "--stable"]
+        expected.update(
+            engine_native_build=engine_native_build(a.src, a.queue, rebuild, a.constraints, built["recipe"], torch),
+            engine_native_manifest_sha256=a.engine_manifest_sha256,
+            engine_natives={rel: e["sha256"] for rel, e in sorted(engine_pinned["artefacts"].items())},
+            engine_native_toolchain=dict(built["recipe"], config=built["config"], nvcc=built["nvcc"],
+                                         cxx=built["cxx"]))
+    if (a.engine_native_build or None) != expected["engine_native_build"]:
+        raise Refusal(f"RELEASE_ENGINE_NATIVE_BUILD {a.engine_native_build!r} is not "
+                      f"{expected['engine_native_build']!r} (the queue's native trees, the rebuilt library, the lock "
+                      f"and the queue's wheel recipe)")
     problems = [f"{k}: the record has {doc.get(k)!r}, the build {v!r}" for k, v in expected.items()
                 if doc.get(k) != v]
     problems += [f"{k}: not an assembly field" for k in set(doc) - set(expected) - {"created"}]
     if problems:
         raise Refusal(f"{a.record} does not describe this build:\n  " + "\n  ".join(problems))
-    print(f"[assembly] {a.record} describes this build")
+    held = {rel: sha256_file(engine_tree / rel) for rel in doc["engine_natives"]}
+    if held == doc["engine_natives"]:
+        write(Path(a.out), Path(a.record).read_bytes(), 0o664)
+        print(f"[assembly] {a.record} describes this build; into {a.out} unchanged")
+    else:
+        write(Path(a.out), (json.dumps(dict(doc, engine_natives=held), indent=2, sort_keys=True) + "\n").encode(),
+              0o664)
+        print(f"[assembly] {a.record} describes this build; into {a.out} with the rebuilt engine natives "
+              f"{json.dumps(held, sort_keys=True)}")
 
 
 # ---------------------------------------------------------------- files and checks
@@ -349,10 +439,15 @@ def main(argv=None):
     g = sub.add_parser("plugin")
     for name in ("tree", "native", "pinned-manifest", "manifest-sha256", "src", "plugin"):
         g.add_argument("--" + name, required=True)
+    n = sub.add_parser("engine")
+    for name in ("tree", "native", "pinned-manifest", "manifest-sha256", "src", "queue"):
+        n.add_argument("--" + name, required=True)
     r = sub.add_parser("record")
     for name in ("record", "opt", "src", "constraints", "pinned-manifest", "manifest-sha256", "upstream", "queue",
-                 "plugin", "native-build", "wheel-file", "wheel-url", "wheel-sha256"):
+                 "plugin", "native-build", "wheel-file", "wheel-url", "wheel-sha256", "out"):
         r.add_argument("--" + name, required=True)
+    for name in ("engine-native-build", "engine-pinned-manifest", "engine-manifest-sha256"):
+        r.add_argument("--" + name, default="")
     f = sub.add_parser("files")
     for name in ("opt", "src", "queue", "plugin", "out"):
         f.add_argument("--" + name, required=True)

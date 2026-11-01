@@ -8,6 +8,7 @@
   pack        the image builders' step: check the pinned manifest, then install
               the files into the image stage (the image never compiles them)
   check-oci   an assembled OCI image holds exactly the manifest's files
+  wheel-recipe  how upstream builds a commit's wheel libraries (--stable/--moe-stable follow it), as JSON
 
 Our extensions are vllm._ampere_marlin_C (the fork's
 csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py) and, on commits that
@@ -22,31 +23,43 @@ names the build native-<csrc tree hash10>-t<torch>: one build per (csrc tree, to
 dependency lock). Not with --cache, --stable, --moe-stable, --no-marlin or --fetchcontent.
 
 build --stable also rebuilds the wheel's core library vllm._C_stable_libtorch (the
-CMake target _C_stable_libtorch, TORCH_CUDA_ARCH_LIST 8.0), and build --moe-stable the
-wheel's MoE library vllm._moe_C_stable_libtorch (the CMake target _moe_C_stable_libtorch,
-same CMake tree), for a commit that changes an upstream-owned input they read.
-Its CMake configure reads every FetchContent source the commit's CMakeLists.txt and
+CMake target _C_stable_libtorch), and build --moe-stable the wheel's MoE library
+vllm._moe_C_stable_libtorch (the CMake target _moe_C_stable_libtorch, same CMake tree), for a
+commit that changes an upstream-owned input they read (the plugin's native-input rules,
+vllm_sm80/launch/data/native_inputs.toml, decide). They are built the way
+upstream builds its x86_64 CUDA wheel, so that a rebuilt library differs from the wheel's only
+where the commit's sources do (every other kernel SASS-identical): the
+commit's .buildkite/release-pipeline.yaml wheel step names the build image (BUILD_BASE_IMAGE,
+used only by the manifest digest WHEEL_BUILDERS pins; --wheel-oci DIR holds its OCI layout as
+<digest hex>/, pulled with crane when missing) and the arch list (torch_cuda_arch_list); the
+build follows docker/Dockerfile's csrc-build stage (source at /workspace, the image's own
+environment and compilers) and setup.py's CMake configure (Release, FetchContent in
+/workspace/.deps, NVCC_THREADS 8) and install. `wheel-recipe` prints what a commit's build follows.
+Their CMake configure reads every FetchContent source the commit's CMakeLists.txt and
 cmake/external_projects/*.cmake declare: --fetchcontent DIR holds them as <name>-src,
 cloned on the host at the declared GIT_TAG (and submodules) when missing or declared
-otherwise (the base image has no git; the namespace has no network then).
+otherwise (the namespace has no network then).
 
 build --cache DIR (instead of --work): a persistent work directory, locked for the
-build: the extracted base, the Python and venv (kept while the base, the constraints and
-the pinned versions are the same), the FetchContent copies and the CMake tree of the
-wheel targets. The source is moved from the cached commit to --commit by rewriting only the
-files that differ (fresh mtimes), so Ninja recompiles only what they reach; the fork
-natives are built in fresh directories each time. The manifest names the commit the
-CMake tree was last built at (extensions[...].incremental_from; null: a full build).
+build: the extracted base and wheel builder, the Python and venv (kept while the base, the
+constraints and the pinned versions are the same), the FetchContent copies and the CMake tree
+of the wheel targets (kept while the wheel recipe is the same). The source is moved from the
+cached commit to --commit by rewriting only the files that differ (fresh mtimes), so Ninja
+recompiles only what they reach; the fork natives are built in fresh directories each time.
+The manifest names the commit the CMake tree was last built at (extensions[...].incremental_from;
+null: a full build).
 
 Reproducibility: the build runs in a private mount namespace with one fixed
-layout (/opt/python, /opt/venv, /opt/vllm-src, /tmp/native-build), the CUDA
-13.3.1 devel base image as its root (nvcc and g++ by image digest), the source
+layout (/opt/python, /opt/venv, /opt/vllm-src, /tmp/native-build; the wheel targets'
+source at /workspace), the CUDA 13.3.1 devel base image as its root (nvcc and g++ by
+image digest; the wheel targets: the wheel builder's), the source
 from `git archive` (file list and order from the commit, mtimes at the commit
 time), SOURCE_DATE_EPOCH at the commit time, nvcc intermediates named after
 their object instead of the process id (-objtemp), a fixed host name, user and
 HOME, and a cleared environment. CUDA's front end names internal-linkage
 symbols after the absolute source path, so a fixed layout, not only
--ffile-prefix-map, is what makes the bytes independent of the build directory.
+-ffile-prefix-map, is what makes the bytes independent of the build directory
+(and /workspace, upstream's, what makes the wheel targets' names upstream's).
 The manifest names no host path, so two builds of one commit give the same
 manifest bytes (a --cache build names the commit its CMake tree was built from).
 """
@@ -95,13 +108,34 @@ PLUGIN_EXL3 = PLUGIN_PACKAGE + "/_exl3_C.abi3.so"
 SHIPPED_MANIFEST = "venv/.native-manifest.json"
 STABLE = "vllm/_C_stable_libtorch.abi3.so"
 MOE_STABLE = "vllm/_moe_C_stable_libtorch.abi3.so"
-# The wheel's CMake targets build rebuilds, by option (argparse dest): its artefact and target.
+# The wheel's CMake targets build rebuilds, by option (argparse dest): its artefact and target (the native-input
+# rules' wheel = true artefacts).
 WHEEL_TARGETS = {"stable": (STABLE, "_C_stable_libtorch"), "moe_stable": (MOE_STABLE, "_moe_C_stable_libtorch")}
+# How upstream builds its x86_64 CUDA wheel (module doc), which --stable/--moe-stable follow: the commit's pipeline
+# step of that name (its docker build of docker/Dockerfile's `build` target names the image and the arch list), the
+# images it may name by their linux/amd64 manifest digest, and the csrc-build stage's layout and setup.py's settings.
+WHEEL_PIPELINE = ".buildkite/release-pipeline.yaml"
+WHEEL_STEP = "Build wheel - x86_64 - CUDA"
+WHEEL_BUILDERS = {
+    # crane digest (10-31; the image was created 06-26). Upstream 330c5bffee's wheel was built in it: its sm_80 cubins'
+    # ptxas is V13.0.88 (cuda_13.0.r13.0/compiler.36424714_0, .note.nv.tkinfo), its host code GCC 13.3.1 (Red Hat
+    # 13.3.1-2: gcc-toolset-13), its CCCL 3.0.1 (THRUST_300001_SM_750_800_860_890_900_1000_1200_ names).
+    "pytorch/manylinux2_28-builder:cuda13.0-78e737ad29420ffc4800e677c51e2a852caf8359":
+        "sha256:c8d8dba2124931732d1b073dec1d8999cd4d6c5ff7c5e77232137e77d9f00f6a",
+}
+WHEEL_SRC = "/workspace"                                          # the stage's WORKDIR, CMake's source directory
+WHEEL_BUILD = WHEEL_SRC + "/build/temp.linux-x86_64-cpython-312"  # setup.py's build_temp: the CMake tree
+WHEEL_LIB = WHEEL_SRC + "/build/lib.linux-x86_64-cpython-312"     # setup.py's build_lib: its cmake --install prefix
+WHEEL_DEPS = WHEEL_SRC + "/.deps"                                 # setup.py's FETCHCONTENT_BASE_DIR
+WHEEL_NVCC_THREADS = 8                                            # the stage's NVCC_THREADS
+# The directories the wheel builder's namespace binds over: created empty in its root filesystem, never shipped.
+WHEEL_MOUNTS = ("opt/python", "opt/venv", "opt/native-tools", WHEEL_SRC.lstrip("/"), "tmp")
 # The CMake files of a CUDA configure that declare FetchContent sources (cmake/cpu_extension.cmake: CPU builds only).
 FETCH_FILES = ("CMakeLists.txt", "cmake/external_projects")
 FETCH_MARKER = ".native-fetch.json"
-# --cache: what the kept rootfs, Python, venv and native-tools depend on; another value starts the cache afresh.
-CACHE_LAYOUT = 1
+# --cache: what the kept rootfs, Python, venv and native-tools depend on; another value starts the cache afresh
+# (2: the wheel targets build in the wheel builder, their CMake tree under the source).
+CACHE_LAYOUT = 2
 TOOLS = ("/usr/local/cuda/bin/nvcc", "/usr/local/cuda/bin/cudafe++",
          "/usr/local/cuda/nvvm/bin/cicc", "/usr/local/cuda/bin/ptxas",
          "/usr/local/cuda/bin/fatbinary", "/usr/local/cuda/bin/nvlink")
@@ -137,6 +171,22 @@ print(json.dumps({"python": sys.version.split()[0], "torch": torch.__version__,
                                  if os.path.exists(os.path.join(t, "lib", n))}},
                  sort_keys=True))
 """
+# A namespace's compilers: their versions and the bytes of each (CUDA's tools, and the C++ compiler, cc1plus, as and ld
+# its PATH resolves: the base image's /usr/bin, the wheel builder's gcc-toolset).
+TOOLCHAIN_PROBE = (
+    "python3=/opt/venv/bin/python; $python3 - <<'EOF'\n"
+    "import hashlib, json, os, shutil, subprocess\n"
+    "def v(*a): return subprocess.run(a, capture_output=True, text=True).stdout.strip()\n"
+    "def sha(p): return hashlib.sha256(open(p, 'rb').read()).hexdigest()\n"
+    f"tools = {list(TOOLS)!r}\n"
+    "cc1 = v('c++', '-print-prog-name=cc1plus')\n"
+    "paths = tools + [os.path.realpath(shutil.which('c++')), cc1, os.path.realpath(shutil.which('as')),"
+    " os.path.realpath(shutil.which('ld'))]\n"
+    "print(json.dumps({'nvcc': v('nvcc', '--version').splitlines()[-2:],"
+    " 'cxx': v('c++', '--version').splitlines()[0], 'ld': v('ld', '--version').splitlines()[0],"
+    " 'ninja': v('/opt/venv/bin/ninja', '--version'),"
+    " 'sha256': {os.path.realpath(p): sha(p) for p in paths}}))\n"
+    "EOF\n")
 
 
 class NativeError(RuntimeError):
@@ -257,19 +307,19 @@ def apply_layer(root, stream, modes=None):
     return skipped
 
 
-def extract_base(oci, rootfs):
-    """Verify the pinned base OCI layout and extract its root filesystem. Either pull form is the
-    base (oci_layers.verify_base, as the image build checks it): the pinned image index whose one
-    linux/amd64 entry is the pinned manifest, or the pinned manifest itself."""
+def extract_image(oci, rootfs, index, manifest_digest, what):
+    """Verify the OCI layout OCI is the pinned image (oci_layers.verify_base, as the image build checks its base:
+    the image index INDEX whose one linux/amd64 entry is MANIFEST_DIGEST, or that manifest itself; INDEX None: the
+    manifest alone) and extract its root filesystem into ROOTFS; (manifest, config, device nodes skipped)."""
     sys.path.insert(0, str(HERE))
     from oci_layers import verify_base  # noqa: PLC0415
     try:
-        verify_base(Path(oci), BASE_INDEX, BASE_MANIFEST)
+        verify_base(Path(oci), index, manifest_digest)
     except (OSError, KeyError, ValueError) as exc:
-        raise NativeError(f"{oci} is not the pinned base (linux/amd64 {BASE_MANIFEST}): {exc}") from None
+        raise NativeError(f"{oci} is not the pinned {what} (linux/amd64 {manifest_digest}): {exc}") from None
     manifest, config = oci_image(oci)
     if config.get("architecture") != "amd64" or config.get("os") != "linux":
-        raise NativeError("base image is not linux/amd64")
+        raise NativeError(f"{what} image is not linux/amd64")
     rootfs.mkdir(parents=True)
     root = rootfs.resolve()
     skipped = 0
@@ -290,6 +340,15 @@ def extract_base(oci, rootfs):
                 h.update(block)
         if "sha256:" + h.hexdigest() != desc["digest"]:
             raise NativeError(f"layer digest mismatch: {desc['digest']}")
+    return manifest, config, skipped
+
+
+def extract_base(oci, rootfs):
+    """Verify the pinned base OCI layout and extract its root filesystem. Either pull form is the
+    base: the pinned image index whose one linux/amd64 entry is the pinned manifest, or the pinned
+    manifest itself."""
+    manifest, _, skipped = extract_image(oci, rootfs, BASE_INDEX, BASE_MANIFEST, "base")
+    root = rootfs.resolve()
     # Mount points the namespace binds over; created empty, never shipped.
     (root / "etc/resolv.conf").unlink(missing_ok=True)
     (root / "etc/resolv.conf").touch()
@@ -298,6 +357,37 @@ def extract_base(oci, rootfs):
     return {"index": BASE_INDEX, "manifest": BASE_MANIFEST,
             "config": manifest["config"]["digest"], "device_nodes_skipped": skipped,
             "mount_points": ["/etc/resolv.conf", "/opt", "/tmp"]}
+
+
+def extract_wheel_builder(oci, rootfs, recipe):
+    """Extract the wheel builder image RECIPE names (wheel_recipe) from its pulled layout OCI; its identity, its
+    environment (the image's Env: its PATH puts its CUDA and gcc-toolset first) and the mount points made."""
+    manifest, config, skipped = extract_image(oci, rootfs, None, recipe["manifest"], "wheel builder")
+    root = rootfs.resolve()
+    for name in WHEEL_MOUNTS:
+        (root / name).mkdir(parents=True, exist_ok=True)
+    return {"image": recipe["image"], "manifest": recipe["manifest"], "config": manifest["config"]["digest"],
+            "env": (config.get("config") or {}).get("Env") or [], "device_nodes_skipped": skipped,
+            "mount_points": ["/" + name for name in WHEEL_MOUNTS]}
+
+
+def wheel_builder_oci(directory, recipe):
+    """The OCI layout of the wheel builder RECIPE names: DIRECTORY/<manifest digest hex>, pulled by digest once
+    (crane: $CRANE, else crane on PATH) when missing; extract_wheel_builder verifies it."""
+    layout = directory / recipe["manifest"].split(":", 1)[1]
+    if (layout / "index.json").is_file():
+        return layout
+    crane = os.environ.get("CRANE") or shutil.which("crane")
+    if not crane:
+        raise NativeError(f"{layout} is missing and no crane ($CRANE or PATH) pulls it: "
+                          f"crane pull --format=oci {recipe['image']}@{recipe['manifest']} {layout}")
+    partial = layout.with_name(layout.name + ".part")
+    if partial.exists():
+        _remove(partial)
+    directory.mkdir(parents=True, exist_ok=True)
+    run([crane, "pull", "--format=oci", f"{recipe['image']}@{recipe['manifest']}", str(partial)])
+    partial.rename(layout)
+    return layout
 
 
 # ------------------------------------------------------------------ namespace
@@ -321,6 +411,22 @@ def environment(epoch, jobs, extra=None):
     return env
 
 
+def wheel_environment(epoch, jobs, image_env, arch_list):
+    """The wheel targets' environment: the wheel builder image's own (IMAGE_ENV, its Env: CUDA and gcc-toolset first on
+    PATH), the venv first on PATH as docker/Dockerfile puts /opt/venv, the recipe's arch list ARCH_LIST, and
+    environment()'s reproducibility settings."""
+    env = dict(item.split("=", 1) for item in image_env)
+    if not env.get("PATH"):
+        raise NativeError("the wheel builder image sets no PATH")
+    env.update({
+        "PATH": "/opt/venv/bin:" + env["PATH"], "VIRTUAL_ENV": "/opt/venv", "HOME": "/root",
+        "SOURCE_DATE_EPOCH": str(epoch), "CUDA_VISIBLE_DEVICES": "", "TORCH_CUDA_ARCH_LIST": arch_list,
+        "NVCC_APPEND_FLAGS": "-objtemp", "MAX_JOBS": str(jobs),
+        "PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": "0",
+    })
+    return env
+
+
 def namespace_argv(rootfs, opt, build, env, cmd, *, network=False, uv=None,
                    uv_cache=None, source_readonly=True):
     argv = ["bwrap", "--unshare-all", "--unshare-user"]
@@ -341,13 +447,29 @@ def namespace_argv(rootfs, opt, build, env, cmd, *, network=False, uv=None,
     return argv + ["--", *cmd]
 
 
+def wheel_namespace_argv(rootfs, opt, env, cmd):
+    """The wheel builder's namespace: its root filesystem ROOTFS, our Python, venv and native-tools of OPT read-only
+    in its /opt beside its own (gcc-toolset), the source writable at WHEEL_SRC; offline."""
+    argv = ["bwrap", "--unshare-all", "--unshare-user", "--die-with-parent", "--hostname", "native-build",
+            "--uid", "0", "--gid", "0", "--ro-bind", str(rootfs), "/", "--dev", "/dev", "--proc", "/proc",
+            "--tmpfs", "/tmp"]
+    for name in ("python", "venv", "native-tools"):
+        argv += ["--ro-bind", str(Path(opt) / name), f"/opt/{name}"]
+    argv += ["--bind", str(Path(opt) / "vllm-src"), WHEEL_SRC, "--chdir", "/", "--clearenv"]
+    for key in sorted(env):
+        argv += ["--setenv", key, env[key]]
+    return argv + ["--", *cmd]
+
+
 class Namespace:
     def __init__(self, rootfs, opt, build, env, log):
         self.rootfs, self.opt, self.build, self.env, self.log = rootfs, opt, build, env, log
 
+    def argv(self, cmd, **kw):
+        return namespace_argv(self.rootfs, self.opt, self.build, self.env, cmd, **kw)
+
     def __call__(self, script, **kw):
-        argv = namespace_argv(self.rootfs, self.opt, self.build, self.env,
-                              ["/bin/sh", "-euc", script], **kw)
+        argv = self.argv(["/bin/sh", "-euc", script], **kw)
         with self.log.open("a") as log:
             log.write(f"\n$ {script}\n")
             log.flush()
@@ -356,9 +478,14 @@ class Namespace:
             raise NativeError(f"namespace step failed ({result.returncode}); see {self.log}")
 
     def output(self, script):
-        argv = namespace_argv(self.rootfs, self.opt, self.build, self.env,
-                              ["/bin/sh", "-euc", script])
-        return subprocess.run(argv, check=True, capture_output=True, text=True).stdout
+        return subprocess.run(self.argv(["/bin/sh", "-euc", script]), check=True, capture_output=True,
+                              text=True).stdout
+
+
+class WheelNamespace(Namespace):
+    """The wheel builder's namespace (wheel_namespace_argv); BUILD is not in it."""
+    def argv(self, cmd):
+        return wheel_namespace_argv(self.rootfs, self.opt, self.env, cmd)
 
 
 # ---------------------------------------------------------------------- build
@@ -420,17 +547,77 @@ cp {BUILD}/exl3/_exl3_C.abi3.so {BUILD}/out/vllm/_exl3_C.abi3.so
 """
 
 
-def stable_script(jobs, targets):
-    """The wheel's CMake TARGETS ([(artefact, target)]): configure once per build tree (a kept tree re-runs CMake
-    itself when its CMake inputs change), build only those targets, copy them out."""
+def wheel_recipe(repo, commit):
+    """How upstream builds COMMIT's wheel libraries (module doc): {image, manifest, torch_cuda_arch_list, build_type,
+    nvcc_threads, cmake (ours: the version its build used is not recorded), source, build, fetchcontent}; native builds
+    are named by it. Refused: a commit whose WHEEL_PIPELINE has not one WHEEL_STEP step with
+    one docker build of docker/Dockerfile's build target, an image WHEEL_BUILDERS does not pin, no arch list, or a build
+    without USE_SCCACHE=1 (the Dockerfile builds Release only then; else setup.py's default RelWithDebInfo)."""
+    where = f"{commit[:10]}:{WHEEL_PIPELINE}"
+    try:
+        text = git(repo, "show", f"{commit}:{WHEEL_PIPELINE}")
+    except subprocess.CalledProcessError:
+        raise NativeError(f"{where} does not exist: no upstream wheel build to follow") from None
+    steps = [block for block in re.split(r"^\s*-\s+label:\s*", text, flags=re.M)[1:]
+             if block.split("\n", 1)[0].strip().strip("\"'").startswith(WHEEL_STEP)]
+    commands = [line for block in steps for line in block.splitlines() if "docker build" in line]
+    if len(steps) != 1 or len(commands) != 1:
+        raise NativeError(f"{where}: not one '{WHEEL_STEP}' step with one docker build ({len(steps)} steps, "
+                          f"{len(commands)} docker builds)")
+    command = commands[0]
+    if not re.search(r"\s-f docker/Dockerfile\s", command) or not re.search(r"\s--target build\s", command):
+        raise NativeError(f"{where}: the wheel build is not docker/Dockerfile's build target: {command.strip()}")
+
+    def arg(name):
+        values = re.findall(rf'--build-arg {name}=(\\"[^"\\]*\\"|"[^"]*"|[^\s"\\]+)', command)
+        return [value.replace('\\"', '"').strip('"') for value in values]
+
+    images, archs = arg("BUILD_BASE_IMAGE"), arg("torch_cuda_arch_list")
+    if arg("USE_SCCACHE") != ["1"]:
+        raise NativeError(f"{where}: the wheel build sets no USE_SCCACHE=1, so it is not the Dockerfile's Release build")
+    if len(images) != 1 or len(archs) != 1:
+        raise NativeError(f"{where}: the wheel build names {len(images)} BUILD_BASE_IMAGE and {len(archs)} "
+                          f"torch_cuda_arch_list build arguments, not one each")
+    arch = archs[0]
+    var = re.fullmatch(r"\$\{(\w+)\}", arch)
+    if var:
+        defined = re.findall(rf'^\s+{var.group(1)}:\s*"([^"]*)"\s*$', text, flags=re.M)
+        if len(defined) != 1:
+            raise NativeError(f"{where}: {arch} is defined {len(defined)} times, not once")
+        arch = defined[0]
+    if not re.fullmatch(r"\d+\.\d+[af]?( \d+\.\d+[af]?)*", arch):
+        raise NativeError(f"{where}: the wheel's arch list {arch!r} is not a list of CUDA architectures")
+    if images[0] not in WHEEL_BUILDERS:
+        raise NativeError(f"{where}: the wheel is built in {images[0]}, which WHEEL_BUILDERS does not pin (pin its "
+                          f"linux/amd64 manifest digest once a build in it reproduces that wheel's kernels)")
+    return {"image": images[0], "manifest": WHEEL_BUILDERS[images[0]], "torch_cuda_arch_list": arch,
+            "build_type": "Release", "nvcc_threads": WHEEL_NVCC_THREADS, "cmake": CMAKE_VERSION, "source": WHEEL_SRC,
+            "build": WHEEL_BUILD, "fetchcontent": WHEEL_DEPS}
+
+
+def wheel_path(src, path):
+    """The host path of PATH under WHEEL_SRC, where the source SRC is bound in the wheel builder's namespace."""
+    return src / PurePosixPath(path).relative_to(WHEEL_SRC)
+
+
+def wheel_script(jobs, targets):
+    """setup.py's CMake configure in WHEEL_BUILD (once per kept tree; a kept tree re-runs CMake itself when its inputs
+    change), the build of the wheel's TARGETS ([(artefact, target)]) and setup.py's cmake --install of each into
+    WHEEL_LIB (the installed library has the wheel's dynamic section: no build-tree RUNPATH). JOBS threads as setup.py
+    spends MAX_JOBS: JOBS // NVCC_THREADS compile jobs, each nvcc compiling up to NVCC_THREADS architectures at once."""
+    compile_jobs = max(1, jobs // WHEEL_NVCC_THREADS)
     return f"""
-[ -f {BUILD}/stable/CMakeCache.txt ] || /opt/native-tools/bin/cmake -S {SRC} -B {BUILD}/stable -G Ninja \\
-    -DCMAKE_MAKE_PROGRAM=/opt/venv/bin/ninja -DVLLM_PYTHON_EXECUTABLE=/opt/venv/bin/python \\
-    -DVLLM_TARGET_DEVICE=cuda -DCMAKE_BUILD_TYPE=Release \\
-    -DFETCHCONTENT_BASE_DIR={BUILD}/_deps -DFETCHCONTENT_FULLY_DISCONNECTED=ON
-/opt/native-tools/bin/cmake --build {BUILD}/stable --target {' '.join(t for _, t in targets)} -j {jobs}
-mkdir -p {BUILD}/out/vllm
-""" + "".join(f"cp {BUILD}/stable/{target}.abi3.so {BUILD}/out/{rel}\n" for rel, target in targets)
+mkdir -p {WHEEL_BUILD}
+cd {WHEEL_BUILD}
+[ -f CMakeCache.txt ] || /opt/native-tools/bin/cmake {WHEEL_SRC} -G Ninja -DCMAKE_BUILD_TYPE=Release \\
+    -DVLLM_TARGET_DEVICE=cuda -DVLLM_PYTHON_EXECUTABLE=/opt/venv/bin/python3 \\
+    -DFETCHCONTENT_BASE_DIR={WHEEL_DEPS} -DNVCC_THREADS={WHEEL_NVCC_THREADS} \\
+    -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -DCMAKE_MAKE_PROGRAM=/opt/venv/bin/ninja \\
+    -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+/opt/native-tools/bin/cmake --build . --target {' '.join(t for _, t in targets)} -j {compile_jobs}
+""" + "".join(f"rm -f {WHEEL_LIB}/{rel}\n"
+              f"/opt/native-tools/bin/cmake --install . --prefix {WHEEL_LIB} --component {target}\n"
+              for rel, target in targets)
 
 
 # ------------------------------------------------------------ FetchContent sources
@@ -671,13 +858,19 @@ def _build(args, repo, work, out, cache):
                            if wheel
                            else "this commit builds vllm._exl3_C") +
                           ": pass --fetchcontent DIR (CMake FetchContent sources, <name>-src)")
+    recipe = wheel_recipe(repo, commit) if wheel else None
+    if wheel and not args.wheel_oci:
+        raise NativeError("--stable/--moe-stable build in upstream's wheel builder image: pass --wheel-oci DIR (its "
+                          "OCI layouts as <manifest digest hex>/)")
     timings["source_s"] = round(time.monotonic() - step, 3)
     if wheel:
         step = time.monotonic()
         fetch_sources(repo, commit, args.fetchcontent.resolve())
         timings["fetchcontent_s"] = round(time.monotonic() - step, 3)
-    if exl3 == "cmake" or wheel:
+    if exl3 == "cmake":
         deps = sync_sources(args.fetchcontent.resolve(), bld / "_deps")
+    if wheel:
+        deps = sync_sources(args.fetchcontent.resolve(), wheel_path(src, WHEEL_DEPS))
 
     env = environment(epoch, args.jobs)
     ns = Namespace(rootfs, opt, bld, env, log)
@@ -702,7 +895,8 @@ VIRTUAL_ENV=/opt/native-tools /tmp/uv/uv pip install cmake=={CMAKE_VERSION}
            source_readonly=False)
         timings["python_venv_s"] = round(time.monotonic() - step, 3)
     if cache:
-        state = {"key": key, "commit": commit, "stable_commit": None if fresh else state.get("stable_commit")}
+        state = {"key": key, "commit": commit, "stable_commit": None if fresh else state.get("stable_commit"),
+                 "wheel_recipe": None if fresh else state.get("wheel_recipe")}
         state_file.write_text(dump(state))
 
     extensions = {}
@@ -727,34 +921,44 @@ VIRTUAL_ENV=/opt/native-tools /tmp/uv/uv pip install cmake=={CMAKE_VERSION}
                                 "cmake": CMAKE_VERSION, "fetchcontent": deps,
                                 "flags": cmake_target_flags(bld / "exl3/build.ninja", "_exl3_C")}
     if wheel:
-        kept = (bld / "stable/CMakeCache.txt").is_file()
+        step = time.monotonic()
+        wroot, wmarker = work / "wheel-rootfs", work / "wheel-rootfs.base.json"
+        if cache and wmarker.is_file() and json.loads(wmarker.read_text()).get("manifest") == recipe["manifest"] \
+                and wroot.is_dir():
+            wbase = json.loads(wmarker.read_text())
+        else:
+            wmarker.unlink(missing_ok=True)
+            if wroot.exists():
+                _remove(wroot)
+            wbase = extract_wheel_builder(wheel_builder_oci(args.wheel_oci.resolve(), recipe), wroot, recipe)
+            wmarker.write_text(dump(wbase))
+        timings["wheel_rootfs_s"] = round(time.monotonic() - step, 3)
+        tree, lib = wheel_path(src, WHEEL_BUILD), wheel_path(src, WHEEL_LIB)
+        if state.get("wheel_recipe") != recipe:   # a CMake tree of another recipe: configure afresh
+            for directory in (tree, lib):
+                if directory.exists():
+                    _remove(directory)
+        kept = (tree / "CMakeCache.txt").is_file()
+        wenv = wheel_environment(epoch, args.jobs, wbase["env"], recipe["torch_cuda_arch_list"])
+        wns = WheelNamespace(wroot, opt, bld, wenv, log)
         step = time.monotonic()
         # Writable source: the configure generates the Marlin kernels into csrc.
-        ns(stable_script(args.jobs, wheel), source_readonly=False)
+        wns(wheel_script(args.jobs, wheel))
         timings["stable_s"] = round(time.monotonic() - step, 3)
         for rel, target in wheel:
-            extensions[rel] = {"builder": f"CMakeLists.txt target {target}", "cmake": CMAKE_VERSION,
-                               "fetchcontent": deps,
+            (bld / "out" / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(lib / rel, bld / "out" / rel)
+            extensions[rel] = {"builder": f"CMakeLists.txt target {target}", "toolchain": "wheel_toolchain",
+                               "cmake": CMAKE_VERSION, "fetchcontent": deps,
                                "incremental_from": state.get("stable_commit") if kept else None,
-                               "flags": cmake_target_flags(bld / "stable/build.ninja", target)}
+                               "flags": cmake_target_flags(tree / "build.ninja", target)}
+        wheel_toolchain = {"recipe": recipe, "config": wbase["config"], **json.loads(wns.output(TOOLCHAIN_PROBE)),
+                           "environment": {k: v for k, v in wenv.items() if k != "MAX_JOBS"}}
         if cache:
-            state["stable_commit"] = commit
+            state.update(stable_commit=commit, wheel_recipe=recipe)
             state_file.write_text(dump(state))
 
-    tools = json.loads(ns.output(
-        "python3=/opt/venv/bin/python; $python3 - <<'EOF'\n"
-        "import hashlib, json, os, subprocess\n"
-        "def v(*a): return subprocess.run(a, capture_output=True, text=True).stdout.strip()\n"
-        "def sha(p): return hashlib.sha256(open(p, 'rb').read()).hexdigest()\n"
-        f"tools = {list(TOOLS)!r}\n"
-        "cc1 = v('c++', '-print-prog-name=cc1plus')\n"
-        "paths = tools + [os.path.realpath('/usr/bin/c++'), cc1, os.path.realpath('/usr/bin/as'),"
-        " os.path.realpath('/usr/bin/ld')]\n"
-        "print(json.dumps({'nvcc': v('nvcc', '--version').splitlines()[-2:],"
-        " 'cxx': v('c++', '--version').splitlines()[0], 'ld': v('ld', '--version').splitlines()[0],"
-        " 'ninja': v('/opt/venv/bin/ninja', '--version'),"
-        " 'sha256': {os.path.realpath(p): sha(p) for p in paths}}))\n"
-        "EOF\n"))
+    tools = json.loads(ns.output(TOOLCHAIN_PROBE))
     tools["uv"] = subprocess.run([str(uv), "--version"], check=True, capture_output=True,
                                  text=True).stdout.split()[1]
     python = json.loads(ns.output("/opt/venv/bin/python -c " + _shell(PROBE) + " " +
@@ -786,6 +990,8 @@ VIRTUAL_ENV=/opt/native-tools /tmp/uv/uv pip install cmake=={CMAKE_VERSION}
     }
     if args.plugin:
         manifest["package"] = PLUGIN_PACKAGE
+    if wheel:
+        manifest["wheel_toolchain"] = wheel_toolchain
     (out / "manifest.json").write_text(dump(manifest))
     timings["total_s"] = round(time.monotonic() - t0, 3)
     record = {"manifest_sha256": sha256(out / "manifest.json"), "artefacts": artefacts,
@@ -1006,9 +1212,14 @@ def main(argv=None):
     w.add_argument("--work", type=Path, help="new scratch directory")
     w.add_argument("--cache", type=Path, help="persistent work directory, built incrementally (module doc)")
     b.add_argument("--stable", action="store_true",
-                   help="also rebuild the wheel's vllm._C_stable_libtorch (its CMake target; needs --fetchcontent)")
+                   help="also rebuild the wheel's vllm._C_stable_libtorch (its CMake target, as upstream builds the "
+                        "wheel; needs --fetchcontent and --wheel-oci)")
     b.add_argument("--moe-stable", action="store_true",
-                   help="also rebuild the wheel's vllm._moe_C_stable_libtorch (its CMake target; needs --fetchcontent)")
+                   help="also rebuild the wheel's vllm._moe_C_stable_libtorch (its CMake target, as upstream builds "
+                        "the wheel; needs --fetchcontent and --wheel-oci)")
+    b.add_argument("--wheel-oci", type=Path,
+                   help="OCI layouts of upstream's wheel builder images, <manifest digest hex>/ (--stable/--moe-stable "
+                        "pull the one they need with crane when missing)")
     b.add_argument("--out", type=Path, required=True, help="new output directory")
     b.add_argument("--jobs", type=int, default=8)
     b.add_argument("--no-marlin", action="store_true",
@@ -1039,13 +1250,17 @@ def main(argv=None):
     o.add_argument("--manifest", type=Path, required=True)
     o.add_argument("--prefix", default="/opt/vllm-src")
     o.add_argument("--require-shipped-manifest", action="store_true")
+    r = sub.add_parser("wheel-recipe", help="how upstream builds a commit's wheel libraries (module doc), as JSON")
+    r.add_argument("--repo", type=Path, required=True)
+    r.add_argument("--commit", required=True)
     a = p.parse_args(argv)
     try:
         if a.command == "build":
             if not (a.base_oci or a.rootfs):
                 p.error("build needs --base-oci or --rootfs")
-            if a.plugin and (a.cache or a.stable or a.moe_stable or a.no_marlin or a.fetchcontent):
-                p.error("build --plugin takes neither --cache, --stable, --moe-stable, --no-marlin nor --fetchcontent")
+            if a.plugin and (a.cache or a.stable or a.moe_stable or a.no_marlin or a.fetchcontent or a.wheel_oci):
+                p.error("build --plugin takes neither --cache, --stable, --moe-stable, --no-marlin, --fetchcontent "
+                        "nor --wheel-oci")
             build(a)
         elif a.command == "install":
             install(a)
@@ -1059,6 +1274,8 @@ def main(argv=None):
             print(f"[native] {a.tree} holds the files of manifest {sha256(a.manifest)}")
         elif a.command == "pack":
             pack(a)
+        elif a.command == "wheel-recipe":
+            print(dump(wheel_recipe(a.repo, git(a.repo, "rev-parse", "--verify", a.commit + "^{commit}"))), end="")
         else:
             check_oci(a)
     except (NativeError, subprocess.CalledProcessError) as error:
