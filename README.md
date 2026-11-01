@@ -162,6 +162,7 @@ the Engram tables costs ~8 % of prefill speed.
 - [Engine switches](docs/engine-switches.md): the engine's switches this release sets, for troubleshooting
 - [Status and known limits](docs/known-limits.md)
 - [Model licences](docs/model-licences.md): the checkpoints' MIT notice
+- [Third-party credits](docs/credits.md): every adapted source, its licence and where it is used
 - [Examples](examples/README.md): curl, Python, streaming, tool calls
 - [Container image](docker/README.md) and [CHANGELOG.md](CHANGELOG.md)
 - Found a problem? [Open an issue](https://github.com/Morrowmake/dsv41-flash-cmp170hx-recipe/issues/new/choose);
@@ -183,7 +184,9 @@ See [LICENSE](LICENSE).
 **The engine** — upstream vLLM `330c5bffee` with our patch queue — is
 [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/dsv41-flash-recipe-1.0.1-queue/LICENSE);
 the `vllm_sm80` plugin is Apache-2.0 with MIT portions adapted from ExLlamaV3
+and GNmac-lab and Apache-2.0 portions adapted from Curtis White
 ([licenses](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin/licenses)).
+The full table is in [docs/credits.md](docs/credits.md).
 
 **orjson 3.13.0** ships in the engine image unmodified, compiled; parts of it
 are MPL-2.0 (the rest Apache-2.0 or MIT). Its source:
@@ -217,14 +220,23 @@ Citation metadata: [`CITATION.cff`](CITATION.cff).
 - **[LibertAIDAI](https://huggingface.co/LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw)**
   for the EXL3 2.9 bpw quantisation of the routed experts, and
   [ExLlamaV3](https://github.com/turboderp-org/exllamav3) (turboderp) for the
-  EXL3 format.
+  EXL3 format and the adapted EXL3 decode/pack/codebook/Hadamard code (MIT).
 - **[MiaAI-Lab](https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-EXL3-2x-DGX-Sparks)**
   for publishing the benchmark prompts and protocol used in the decode tables.
 - **[GNmac-lab](https://github.com/GNmac-lab/deepseek-v41-flash-1017-cmp170hx)**
   for the grouped FP8 `wo_a` GEMM the engine adapts
   (`vllm_sm80/models/deepseek_v41/ops/sm80_wo_a_grouped.py`, MIT, its notice
-  kept in that file), and for the ideas behind the side-stream mHC and the
-  sharded target argmax.
+  kept in that file), and for the ideas behind the side-stream mHC, the
+  sharded target argmax and the per-layer rotated tensor split of the routed
+  experts.
+- **Curtis White ([CurtisAccelerate/DeepSeekv41-Flash-EXL3-TC-MoE](https://github.com/CurtisAccelerate/DeepSeekv41-Flash-EXL3-TC-MoE))**,
+  Apache-2.0, for the hidden-5120 tensor-core MoE lane shape and the
+  tensor-split expert idea.
+- **[b12x](https://github.com/local-inference-lab/b12x)** (local-inference-lab,
+  Apache-2.0) for the design of the copy-engine ring all-reduce; no code is
+  copied.
+
+Where each adapted part is used, with its licence: [docs/credits.md](docs/credits.md).
 
 ## Source
 
