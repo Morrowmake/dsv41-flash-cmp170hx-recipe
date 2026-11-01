@@ -12,6 +12,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 import env_effective as E  # noqa: E402
 
 PIN = "c" * 40
+# The single-tree engine release_engine reads from a start.sh naming RELEASE_VLLM_COMMIT=PIN.
+SINGLE = {"label": PIN, "sources": [(name, PIN) for name in E.ENV_FILES], "image": (E.IMAGE_TREE,)}
 # The generated launch's shape: it clears what it inherits, exports its settings
 # (keeping an inherited engine switch), and under DRY=1 prints them and the command.
 LAUNCH = r'''#!/bin/bash
@@ -169,11 +171,11 @@ def test_effective_image_tree_recipe_keys_and_engine_default_args(capsys):
     policy = "/vllm/models/deepseek_v41/nvidia/dspark_depth_policy.json"
     leg = {"PYTHONPATH": "/srv/lab/tree", "VLLM_DSPARK_ADAPTIVE_DEPTH": "/srv/lab/tree" + policy}
     mine = {"VLLM_DSPARK_ADAPTIVE_DEPTH": E.IMAGE_TREE + policy, "PYTHONDONTWRITEBYTECODE": "1"}
-    assert E.compare_environment(mine, leg, {}, PIN) == []
+    assert E.compare_environment(mine, leg, {}, SINGLE) == []
     out = capsys.readouterr().out
-    assert "the same engine-tree file" in out and "allowed PYTHONDONTWRITEBYTECODE" in out
+    assert "the same engine file" in out and "allowed PYTHONDONTWRITEBYTECODE" in out
     other = dict(mine, VLLM_DSPARK_ADAPTIVE_DEPTH=E.IMAGE_TREE + "/other.json")
-    assert len(E.compare_environment(other, leg, {}, PIN)) == 1
-    assert len(E.compare_environment(mine, dict(leg, PYTHONDONTWRITEBYTECODE="0"), {}, PIN)) == 1
+    assert len(E.compare_environment(other, leg, {}, SINGLE)) == 1
+    assert len(E.compare_environment(mine, dict(leg, PYTHONDONTWRITEBYTECODE="0"), {}, SINGLE)) == 1
     assert E.compare_commands({"pipeline_parallel_size": 1}, {}) == []
     assert len(E.compare_commands({"pipeline_parallel_size": 2}, {})) == 1
