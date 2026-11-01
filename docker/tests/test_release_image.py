@@ -496,3 +496,47 @@ def test_container_environment_matches_start(tmp_path):
                 'TILELANG_CACHE_DIR', 'TILELANG_TMP_DIR', 'CUDA_CACHE_PATH',
                 'FLASHINFER_WORKSPACE_BASE', 'TORCHINDUCTOR_CACHE_DIR'):
         assert actual[key] == expected[key], key
+
+
+def _dist(sp, name, version, files):
+    """A dist-info for NAME claiming FILES {path: bytes} with their RECORD hashes (files not written)."""
+    import base64
+    d = sp / ("%s-%s.dist-info" % (name.replace("-", "_"), version))
+    d.mkdir(parents=True)
+    (d / "METADATA").write_text("Name: %s\nVersion: %s" % (name, version))
+    rows = ["%s,sha256=%s,%d" % (p, base64.urlsafe_b64encode(hashlib.sha256(b).digest()).rstrip(b"=").decode(), len(b))
+            for p, b in files.items()]
+    (d / "RECORD").write_text("\n".join(rows + ["%s/RECORD,," % d.name]) + "\n")
+
+
+@pytest.mark.parametrize("on_disk, ok", [("winner", True), ("loser", False)])
+def test_a_file_two_distributions_install_keeps_the_named_winner(tmp_path, on_disk, ok):
+    # flashinfer-python and torch-c-dlpack-ext both ship site-packages/build_backend.py; the installer wrote either
+    # one, so the dependencies layer differed between builds of one lock.
+    (shared, winner), = payload.SHARED_FILES.items()
+    loser = "flashinfer-python" if winner != "flashinfer-python" else "torch-c-dlpack-ext"
+    opt = tmp_path / "opt"
+    sp = opt / "venv/lib/python3.12/site-packages"
+    _dist(sp, winner, "1", {shared: b"winner\n"})
+    _dist(sp, loser, "1", {shared: b"loser\n"})
+    (sp / shared).write_bytes(b"winner\n" if on_disk == "winner" else b"loser\n")
+    constraints = tmp_path / "CONSTRAINTS"
+    constraints.write_text("%s==1\n%s==1\n" % (winner, loser))
+    if ok:
+        payload.check_lock(opt, constraints)
+    else:
+        with pytest.raises(ValueError, match="other bytes than " + winner):
+            payload.check_lock(opt, constraints)
+    assert payload.winner_reinstalls(constraints) == ["%s==1" % winner]
+
+
+def test_a_file_two_distributions_install_without_a_winner_is_refused(tmp_path):
+    opt = tmp_path / "opt"
+    sp = opt / "venv/lib/python3.12/site-packages"
+    _dist(sp, "pkg-a", "1", {"common.py": b"a\n"})
+    _dist(sp, "pkg-b", "1", {"common.py": b"a\n"})
+    (sp / "common.py").write_bytes(b"a\n")
+    constraints = tmp_path / "CONSTRAINTS"
+    constraints.write_text("pkg-a==1\npkg-b==1\n")
+    with pytest.raises(ValueError, match="common.py is installed by pkg-a, pkg-b"):
+        payload.check_lock(opt, constraints)

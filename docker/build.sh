@@ -211,6 +211,12 @@ build_tree() {
     export VIRTUAL_ENV="$STAGE/opt/venv"
     log "locked dependencies (the engine and the plugin come from /opt/assembly, below)"
     "$UV" pip install "${PIP[@]}" -r "$CONSTRAINTS"
+    # A file two locked distributions install keeps its named winner's bytes
+    # (payload.py SHARED_FILES): the winners are reinstalled last.
+    mapfile -t WINNERS < <(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from payload import winner_reinstalls; sys.stdout.write("".join(w + "\n" for w in winner_reinstalls(sys.argv[2])))' "$HERE" "$CONSTRAINTS")
+    if [ "${#WINNERS[@]}" -gt 0 ]; then
+        "$UV" pip install "${PIP[@]}" --reinstall --no-deps "${WINNERS[@]}"
+    fi
     "$UV" pip freeze > "$STAGE/opt/venv/requirements.lock.txt"
     unset VIRTUAL_ENV
     python3 - "$STAGE/opt" "$CONSTRAINTS" "$HERE" <<'LOCK'
