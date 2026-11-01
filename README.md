@@ -13,8 +13,8 @@
 </p>
 
 **DeepSeek-V4.1-Flash with a 262,144-token context, served on four CMP 170HX
-cards: up to 290 tok/s for one user on structured output (292 on code, 166 on
-prose) and up to 852 tok/s across eight, up to 3,790 tok/s cold prefill of a
+cards: 297 tok/s for one user on structured output and code (170 on
+prose) and up to 868 tok/s across eight, 3,824 tok/s cold prefill of a
 32K prompt and a 1,295,894-token KV pool. The routed
 experts are EXL3 at 2.9 bits per weight; every other weight is DeepSeek's own
 FP8 or BF16, unchanged, and the KV cache is full precision.**
@@ -113,27 +113,29 @@ was validated with.
 
 ## Headline numbers
 
-Measured 2026-10-31 on 4× CMP 170HX, 74 SMs per card, mainline
+Measured 2026-11-01 on 4× CMP 170HX, 74 SMs per card, mainline
 cmpunlocker with P2P, recipe defaults, 262,144-token context, 180 W per card
-and PCIe x16 links, by this release's own release check. Decode uses the
-MiaAI-Lab protocol: 400 tokens, temperature 0, requests sent with thinking off;
-structured and code from its first prompt set, prose from its second, each set
-on its own boot. Every figure is the median of five runs, each run's completion
-tokens over its whole duration, time to the first token included.
+and PCIe x16 links, by this release's own release check, with the 1.0.0 image
+measured on the same machine in the same check. Decode uses the MiaAI-Lab
+protocol: 400 tokens, temperature 0, requests sent with thinking off;
+structured and code from its first prompt set, prose from its second. Each
+figure is the median of five runs on a boot, averaged over two boots; a run is
+its completion tokens over its whole duration, time to the first token
+included.
 
 | | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer) (default after verification) | 1.0.0 |
 |---|---:|---:|
-| **1 user** · structured | **290** | 319 |
-| **1 user** · code | **292** | 287 |
-| **1 user** · prose | **166** | 162 |
-| **8 users, total** · structured | 852 | 765 |
-| **8 users, total** · code | 794 | 729 |
-| **8 users, total** · prose | 457 | 432 |
-| **Prompt reading** (cold prefill, 2K tokens) | 3,758 | 3,818 |
-| **Prompt reading** (cold prefill, 32K tokens) | 3,790 | 3,808 |
+| **1 user** · structured | **297** | 295 |
+| **1 user** · code | **297** | 283 |
+| **1 user** · prose | **170** | 163 |
+| **8 users, total** · structured | 868 | 760 |
+| **8 users, total** · code | 795 | 712 |
+| **8 users, total** · prose | 464 | 426 |
+| **Prompt reading** (cold prefill, 2K tokens) | 3,776 | 3,810 |
+| **Prompt reading** (cold prefill, 32K tokens) | 3,824 | 3,795 |
 | **KV pool** (tokens) | 1,295,894 | 1,247,406 |
 
-All speeds are up to, in tok/s.
+All speeds in tok/s.
 
 One user is the rate of a single request; eight users is the combined rate of
 eight simultaneous requests, both in tokens per second. Structured output and code are drafted well, so

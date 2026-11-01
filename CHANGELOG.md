@@ -6,12 +6,15 @@ Faster decode with more users: each routed expert is now split across the
 four cards.
 
 - **Engine.** Upstream vLLM `330c5bffee` with our patch queue
-  (`0af5991c009e0c3ff4181f026a8e7dffe1370b45`, tag
+  (`e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0`, tag
   `dsv41-flash-recipe-1.0.1-queue`) and the sm_80 plugin `vllm_sm80`
   (`0b34823c39ba0fd5c0d4690887882b4cfa69034e`, tag
   `dsv41-flash-recipe-1.0.1-plugin`); image
-  `ghcr.io/morrowmake/vllm-cmp170hx@sha256:6e02917e575153f2f0d9415c8f528c7b895979db89ad1e5520065f8e0c53d35e`.
-  Torch 2.14.
+  `ghcr.io/morrowmake/vllm-cmp170hx@sha256:32ae8b0e91a6264ba5cd20978d1a44460a8a5a2464641f377987414aa35071e2`.
+  Torch 2.14. The image's `vllm._C_stable_libtorch` is rebuilt from the patch
+  queue's Marlin source, so `docker/build.sh` from this repository rebuilds
+  the published image from public sources: every file the same except that one
+  library, whose machine code is identical.
 - **Layout.** Tensor-parallel 4 with every routed expert split across the
   four cards instead of whole experts per card: each card holds a column
   chunk of every expert, rotated per expert and layer so all four cards carry
@@ -33,11 +36,13 @@ four cards.
   `config.json`), and the start's disk check counts what an interrupted
   download already left in `MODELS_DIR`.
 - **`.env`:** no default changed.
-- Measured on the release image (tokens per second over each run, time to the
-  first token included): one user up to 290 structured, 292 code, 166 prose;
-  eight users together up to 852, 794 and 457; cold prefill up to 3,758 (2K
-  prompt) and 3,790 (32K); KV pool 1,295,894 tokens. HumanEval 158/164 and
-  GSM8K 1,279/1,319, level with 1.0.0 ([Results](docs/results.md)).
+- Measured on the release image beside the 1.0.0 image on the same machine
+  (tokens per second over each run, time to the first token included): one
+  user 297 structured, 297 code, 170 prose (1.0.0: 295, 283, 163); eight users
+  together 868, 795 and 464 (1.0.0: 760, 712, 426); cold prefill 3,776 (2K
+  prompt) and 3,824 (32K) (1.0.0: 3,810, 3,795); KV pool 1,295,894 tokens
+  (1.0.0: 1,247,406). HumanEval 158/164 and GSM8K 1,285/1,319, level with
+  1.0.0 ([Results](docs/results.md)).
 
 Update with `./start.sh update` (keeps `.env`).
 

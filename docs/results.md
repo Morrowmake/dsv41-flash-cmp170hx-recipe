@@ -2,45 +2,52 @@
 
 ## Release 1.0.1
 
-Measured 2026-10-31 on 4× CMP 170HX by this release's own release check:
-upstream vLLM `330c5bffee` with the patch queue `0af5991c00` and the plugin
+Measured 2026-11-01 on 4× CMP 170HX by this release's own release check:
+upstream vLLM `330c5bffee` with the patch queue `e05403fdc3` and the plugin
 `vllm_sm80` `0b34823c39`, the image this release pins
-(`sha256:6e02917e575153f2f0d9415c8f528c7b895979db89ad1e5520065f8e0c53d35e`),
+(`sha256:32ae8b0e91a6264ba5cd20978d1a44460a8a5a2464641f377987414aa35071e2`),
 and the release defaults, on 74 SMs per card, mainline cmpunlocker plus the
 minimal P2P patch, verified P2P, PCIe x16 links, 262,144-token context, the
-Engram tables in host RAM and 180 W per card. Method as for 1.0.0 below; each
-prompt set on one boot.
+Engram tables in host RAM and 180 W per card. The 1.0.0 image was measured on
+the same machine in the same check, two boots of each, alternating. Method as
+for 1.0.0 below; each figure is the median of five runs on a boot, averaged
+over the two boots; prompt reading is the median of four cold requests.
 
 | Users | Structured | Code | Prose | 1.0.0 (structured / code / prose) |
 |---|---:|---:|---:|---|
-| 1 | 290 | 292 | 166 | 319 / 287 / 162 |
-| 2, total | 382 | 448 | 250 | 360 / 431 / 230 |
-| 4, total | 495 | 592 | 342 | 545 / 602 / 324 |
-| 8, total | 852 | 794 | 457 | 765 / 729 / 432 |
+| 1 | 297 | 297 | 170 | 295 / 283 / 163 |
+| 2, total | 392 | 458 | 260 | 359 / 423 / 235 |
+| 4, total | 569 | 642 | 352 | 532 / 600 / 323 |
+| 8, total | 868 | 795 | 464 | 760 / 712 / 426 |
 
 | | 1.0.1 | 1.0.0 |
 |---|---:|---:|
-| Prompt reading (cold prefill, 2,048 tokens), tok/s | 3,758 | 3,818 |
-| Prompt reading (cold prefill, 32,768 tokens), tok/s | 3,790 | 3,808 |
+| Prompt reading (cold prefill, 2,048 tokens), tok/s | 3,776 | 3,810 |
+| Prompt reading (cold prefill, 32,768 tokens), tok/s | 3,824 | 3,795 |
 | KV pool, tokens | 1,295,894 | 1,247,406 |
 
-All speeds are up to, in tok/s.
+All speeds in tok/s.
 
 **Quality**, scored as for 1.0.0, against the 1.0.0 release: HumanEval
-158 / 164 (1.0.0: 157), GSM8K 1,279 / 1,319 (1.0.0: 1,280); McNemar exact
-two-sided p = 1 on both. The release also reproduced the exact-model anchor
-(587 of 587 positions), found every needle up to 262,000 tokens (30 / 30) and
-held memory flat over 200 varying-tail requests.
+158 / 164 (1.0.0: 157), GSM8K 1,285 / 1,319 (1.0.0: 1,280); McNemar exact
+two-sided p = 1 and 0.23. The release also reproduced the exact-model anchor,
+found every needle up to 262,000 tokens (30 / 30) and held memory flat over
+the varying-tail requests.
 
 **Fallbacks**, each measured on one boot of the release image, prose prompts,
 same protocol:
 
 | | 1 user | 2 users, total | 4 users, total | 8 users, total | Cold prefill 2,048 tokens, tok/s |
 |---|---:|---:|---:|---:|---:|
-| Engram tables from the SSD (`VLLM_ENGRAM_PLACEMENT=ssd`), 48 GiB row cache per card | 163 | — | — | 463 | 3,591 |
-| Without peer-to-peer (`P2P=off`) | 136 | 196 | 275 | 354 | 3,694 |
+| Engram tables from the SSD (`VLLM_ENGRAM_PLACEMENT=ssd`), 48 GiB row cache per card | 168 | — | — | 468 | 3,658 |
+| Without peer-to-peer (`P2P=off`) | 141 | 202 | 280 | 357 | 3,739 |
 
-All speeds are up to, in tok/s.
+All speeds in tok/s.
+
+**Reproducing the image.** `docker/build.sh` from this repository rebuilds the
+published image from public sources: every file is the same except
+`vllm._C_stable_libtorch`, rebuilt from the patch queue, whose machine code is
+identical (its bytes differ only in compiler-generated symbol names).
 
 ## Release 1.0.0
 
