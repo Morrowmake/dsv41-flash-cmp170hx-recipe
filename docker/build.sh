@@ -53,10 +53,10 @@ BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce242
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
 RELEASE_UPSTREAM_COMMIT='330c5bffeeb48725c0502a351e8ead2b54bd81eb'
 RELEASE_QUEUE_COMMIT='e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0'
-RELEASE_PLUGIN_COMMIT='0b34823c39ba0fd5c0d4690887882b4cfa69034e'
+RELEASE_PLUGIN_COMMIT='e11b375ab98ce84a3ee5792364e21bc25dcc78fa'
 RELEASE_NATIVE_BUILD='native-6a7c62b43c-t2.14.0'
-QUEUE_TAG="dsv41-flash-recipe-1.0.1-queue"
-PLUGIN_TAG="dsv41-flash-recipe-1.0.1-plugin"
+QUEUE_TAG="dsv41-flash-recipe-1.0.2-queue"
+PLUGIN_TAG="dsv41-flash-recipe-1.0.2-plugin"
 # The upstream nightly wheel of RELEASE_UPSTREAM_COMMIT: its compiled extensions.
 WHEEL_FILE="vllm-0.32.1rc1.dev515+g330c5bffe-cp38-abi3-manylinux_2_28_x86_64.whl"
 WHEEL_URL="https://wheels.vllm.ai/330c5bffeeb48725c0502a351e8ead2b54bd81eb/vllm-0.32.1rc1.dev515%2Bg330c5bffe-cp38-abi3-manylinux_2_28_x86_64.whl"

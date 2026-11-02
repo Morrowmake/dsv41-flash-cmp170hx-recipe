@@ -5,9 +5,9 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20330c5bffee%20%2B%20vllm__sm80%200b34823c39-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.2-plugin"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20330c5bffee%20%2B%20vllm__sm80%20e11b375ab9-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.0.1-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.0.2-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -23,7 +23,7 @@ This repository installs and runs **DeepSeek-V4.1-Flash-1017** on **four NVIDIA
 CMP 170HX cards** behind an OpenAI-compatible API, with tool calls, reasoning
 and images, and the checkpoint's own **DSpark** speculative drafter. The CMP
 170HX is Ampere (sm_80). Upstream vLLM with our patch queue and the sm_80
-plugin `vllm_sm80` ([source](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin))
+plugin `vllm_sm80` ([source](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.2-plugin))
 adds the Ampere kernels that make the model run at all, then spends the rest of its
 patches on making it fast and making it repeatable. It runs only as a container
 image, so the engine and its Python environment stay out of your system.
@@ -182,10 +182,10 @@ the Engram tables costs ~8 % of prefill speed.
 See [LICENSE](LICENSE).
 
 **The engine** — upstream vLLM `330c5bffee` with our patch queue — is
-[Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/dsv41-flash-recipe-1.0.1-queue/LICENSE);
+[Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/dsv41-flash-recipe-1.0.2-queue/LICENSE);
 the `vllm_sm80` plugin is Apache-2.0 with MIT portions adapted from ExLlamaV3
 and GNmac-lab and Apache-2.0 portions adapted from Curtis White
-([licenses](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin/licenses)).
+([licenses](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.2-plugin/licenses)).
 The full table is in [docs/credits.md](docs/credits.md).
 
 **orjson 3.13.0** ships in the engine image unmodified, compiled; parts of it
@@ -242,8 +242,8 @@ Where each adapted part is used, with its licence: [docs/credits.md](docs/credit
 
 The engine source is upstream vLLM plus our patch queue and the `vllm_sm80`
 plugin, with the adaptations credited in its notices: tags
-[`dsv41-flash-recipe-1.0.1-queue`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-queue)
-and [`dsv41-flash-recipe-1.0.1-plugin`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin)
+[`dsv41-flash-recipe-1.0.2-queue`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.2-queue)
+and [`dsv41-flash-recipe-1.0.2-plugin`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.2-plugin)
 on [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx).
 
 ## Acknowledgements

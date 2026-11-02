@@ -314,7 +314,9 @@ complete, the engine starts with P2P disabled:
 `VLLM_CUSTOM_ALLREDUCE_PCIE_P2P=0`, `NCCL_P2P_LEVEL=LOC` and
 `NCCL_P2P_DISABLE=1`. The `[p2p]` banner says `not advertised`,
 `advertised but data check failed`, or `check unavailable` and gives the
-reason. The all-reduces then go through host memory instead.
+reason. The all-reduces then go through host memory instead (the largest
+prefill sums through NCCL); the copy-engine ring, which writes into the other
+cards' memory, stays off.
 
 **Working P2P on CMP 170HX requires a P2P-capable driver build.**
 This release uses mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker)

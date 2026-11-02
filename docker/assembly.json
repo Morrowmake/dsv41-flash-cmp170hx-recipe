@@ -1,5 +1,5 @@
 {
-  "created": "2026-10-31T23:45:41Z",
+  "created": "2026-11-02T00:16:40Z",
   "engine_native_build": "engine-ea66503db898f2b3-t2.14.0",
   "engine_native_manifest_sha256": "891f362f3c351e223447e4d62c345801cae15a55c6ccd1aed6653f351f7ed412",
   "engine_native_toolchain": {
@@ -28,7 +28,7 @@
     "vllm_sm80/_ampere_marlin_C.abi3.so": "e4abeeae70b7f7edb3145f36d55e3a06dc153ed7d869d18b39b0cd9de7ff3805",
     "vllm_sm80/_exl3_C.abi3.so": "18d04f81b8842aff96b51b0fb5b61ea2390e786925b0f00288538c6b7f120f19"
   },
-  "plugin_commit": "0b34823c39ba0fd5c0d4690887882b4cfa69034e",
+  "plugin_commit": "e11b375ab98ce84a3ee5792364e21bc25dcc78fa",
   "plugin_distribution": {
     "dist_info": "vllm_sm80-0.1.0.dist-info",
     "name": "vllm-sm80",

@@ -11,12 +11,12 @@ image, how to build it, and how to run it by hand with `docker run`.
   nothing compiled in the image:
   - `engine/`: the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx)'s patch
     queue at `e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0` (tag
-    `dsv41-flash-recipe-1.0.1-queue`), on upstream `330c5bffee`, with the compiled
+    `dsv41-flash-recipe-1.0.2-queue`), on upstream `330c5bffee`, with the compiled
     extensions of `330c5bffee`'s own nightly wheel, except `vllm._C_stable_libtorch`,
     rebuilt from the queue (it changes `csrc/quantization/marlin/marlin.cu`) the way
     upstream builds that wheel;
   - `plugin/`: the sm_80 plugin `vllm_sm80` at
-    `0b34823c39ba0fd5c0d4690887882b4cfa69034e` (tag `dsv41-flash-recipe-1.0.1-plugin`)
+    `e11b375ab98ce84a3ee5792364e21bc25dcc78fa` (tag `dsv41-flash-recipe-1.0.2-plugin`)
     with its compiled extensions: the sm_80 EXL3 library (`vllm_sm80._exl3_C`,
     required: the routed experts run on it) and the Marlin library;
   - `assembly.json`: the pins, the wheel, the rebuilt engine library and the natives'
@@ -53,7 +53,7 @@ image, how to build it, and how to run it by hand with `docker run`.
 Engine image tag:
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-e05403fdc3-0b34823c39
+ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-e05403fdc3-e11b375ab9
 ```
 
 The tag names all three pins (`engine-<upstream 10>-<queue 10>-<plugin 10>`), so
@@ -71,7 +71,7 @@ writes an OCI layout on the pinned base. Nothing of the engine is compiled into
 the image; it assembles pinned inputs:
 
 - **The queue and the plugin** are fetched from the public fork by their release
-  tags (`dsv41-flash-recipe-1.0.1-queue`, `dsv41-flash-recipe-1.0.1-plugin`); each
+  tags (`dsv41-flash-recipe-1.0.2-queue`, `dsv41-flash-recipe-1.0.2-plugin`); each
   tag must name its pinned commit (`RELEASE_QUEUE_COMMIT`, `RELEASE_PLUGIN_COMMIT`).
   The trees are the commits' files exactly, without Git data.
 - **The upstream wheel** of `RELEASE_UPSTREAM_COMMIT`, pinned by URL and sha256:
@@ -172,7 +172,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-e05403fdc3-0b34823c39
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:engine-330c5bffee-e05403fdc3-e11b375ab9
 MODELS=$PWD/models                  # the three directories ./download.sh made
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 MEM=$(awk '$1 == "MemTotal:" {print $2 "k"}' /proc/meminfo)   # limit, swap included: never swap

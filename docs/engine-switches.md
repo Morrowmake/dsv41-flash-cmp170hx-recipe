@@ -75,7 +75,7 @@ Communication between the cards:
 |---|---|---|
 | `VLLM_CUSTOM_ALLREDUCE_PCIE_P2P` | `1` after a P2P pass, else `0` | the custom all-reduce over PCIe peer-to-peer |
 | `VLLM_CUSTOM_ALLREDUCE_ALGO` | `2stage` | the custom all-reduce's two-stage kernel |
-| `VLLM_SM80_ALLREDUCE` | `1` | the engine's own all-reduce transports, each message on the one its size and the CUDA graph state select: a host-memory all-reduce that stands aside while peer-to-peer serves, a flags-in-data two-shot kernel inside the peer-to-peer custom all-reduce (bitwise the two-stage kernel), and a copy-engine ring for the large sums a layer owns on eager steps |
+| `VLLM_SM80_ALLREDUCE` | `1` | the engine's own all-reduce transports, each message on the one its size and the CUDA graph state select: a host-memory all-reduce that stands aside while peer-to-peer serves, a flags-in-data two-shot kernel inside the peer-to-peer custom all-reduce (bitwise the two-stage kernel), and, after a P2P pass, a copy-engine ring for the large sums a layer owns on eager steps |
 | `VLLM_SM80_ALLREDUCE_COMPRESS` | `1` | the two-shot kernel's BF16 messages in a lossless compressed wire format; the same sums bit for bit; needs `VLLM_SM80_ALLREDUCE` |
 | `VLLM_SM80_ALLREDUCE_ROUND_ONCE` | `1` | the attention output's and the MoE output's partial sums all-reduced with one rounding to BF16 instead of one per step of the sum |
 | `VLLM_SM80_PREFILL_REDUCE_OVERLAP` | `1` | prefill steps of 1,024 rows or more in two row slices, one slice's all-reduces beside the other's compute; changes the summation order |

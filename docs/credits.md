@@ -1,9 +1,9 @@
-# Third-party credits (1.0.1)
+# Third-party credits (1.0.2)
 
 The engine for this release is upstream vLLM with our patch queue and the
-`vllm_sm80` plugin, at tags `dsv41-flash-recipe-1.0.1-queue` and
-[`dsv41-flash-recipe-1.0.1-plugin`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.1-plugin). The table lists every outside source
-whose code or design the 1.0.1 engine uses, and where. Paths are in the plugin
+`vllm_sm80` plugin, at tags `dsv41-flash-recipe-1.0.2-queue` and
+[`dsv41-flash-recipe-1.0.2-plugin`](https://github.com/Morrowmake/vllm-cmp170hx/tree/dsv41-flash-recipe-1.0.2-plugin). The table lists every outside source
+whose code or design the 1.0.2 engine uses, and where. Paths are in the plugin
 tree. Original per-file notices apply as well; this page does not replace them.
 
 | Source | What is used | Where | Licence |
