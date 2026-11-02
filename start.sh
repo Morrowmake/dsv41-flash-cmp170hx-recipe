@@ -138,16 +138,16 @@ load_env_defaults() {
 load_env_defaults "$SCRIPT_DIR/.env"
 
 # ---------------------------- configuration --------------------------------
-# This release's engine: the fork commit the container image is built from,
-# and that image, pinned by digest (docker-compose.yml runs the same image).
-# Both are filled in at release (tools/set-pin.sh moves the commit pin
-# everywhere at once). The commit pin is read by the release tools, not here.
+# This release's engine: the pins the container image is built from, and that
+# image, pinned by digest (docker-compose.yml runs the same image). Both are
+# written at release by the lab's recipe generator; the engine pins are read by
+# the release tools, not here.
 # shellcheck disable=SC2034
 RELEASE_UPSTREAM_COMMIT=330c5bffeeb48725c0502a351e8ead2b54bd81eb
 RELEASE_QUEUE_COMMIT=e05403fdc3750880da4a5f4cd8c55c5fae3b3ae0
-RELEASE_PLUGIN_COMMIT=0b34823c39ba0fd5c0d4690887882b4cfa69034e
+RELEASE_PLUGIN_COMMIT=e11b375ab98ce84a3ee5792364e21bc25dcc78fa
 RELEASE_NATIVE_BUILD=native-6a7c62b43c-t2.14.0
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:32ae8b0e91a6264ba5cd20978d1a44460a8a5a2464641f377987414aa35071e2
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:73e79648b5e2a32633885c65ea2e4a83ffcd7f543899ffb890eeef7edbac709d
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 # Where the checkpoints are: MODELS_DIR (a relative path is taken from this
 # checkout), models/ here by default. Each checkpoint is a plain directory in
@@ -526,7 +526,10 @@ do_download() {
     for k in EXPORT_REPO EXPORT_REVISION OFFICIAL_REPO OFFICIAL_REVISION NEED_DISK_GB REFRESH_WEIGHTS; do
         [ -z "${!k:-}" ] || settings+=(-e "$k=${!k}")
     done
-    docker run --rm --user "$(id -u):$(id -g)" -e HF_HOME=/tmp/hf \
+    # Named after the server container (CONTAINER_NAME-download), so whatever
+    # tears down this checkout's containers can name it too.
+    docker run --rm --name "$CONTAINER_NAME-download" --label "$LABEL=$SCRIPT_DIR" \
+        --user "$(id -u):$(id -g)" -e HF_HOME=/tmp/hf \
         ${HF_TOKEN:+-e HF_TOKEN} "${settings[@]}" "${mounts[@]}" \
         -v "$SCRIPT_DIR/docker/prepare.sh:/recipe/prepare.sh:ro" \
         --entrypoint /bin/bash "$IMAGE" /recipe/prepare.sh models
@@ -641,7 +644,8 @@ container_args() {
 dry_serve() {
     local envfile="$1"
     if command -v docker >/dev/null 2>&1 && container_image_present; then
-        docker run --rm --env-file "$envfile" -e DRY=1 --entrypoint /bin/bash "$IMAGE" /opt/recipe/serve.sh
+        docker run --rm --name "$CONTAINER_NAME-dry" --label "$LABEL=$SCRIPT_DIR" \
+            --env-file "$envfile" -e DRY=1 --entrypoint /bin/bash "$IMAGE" /opt/recipe/serve.sh
     else
         log "  (the image is not here: this checkout's serve.sh, which the image carries)"
         env -i PATH="$PATH" $(grep -E '^(LAYOUT|HOST|PORT)=' "$envfile") DRY=1 bash "$SCRIPT_DIR/serve.sh"

@@ -95,7 +95,7 @@ def release_engine(root=ROOT):
                 "sources": [(name, pins[pin]) for name, pin in PINNED_ENV_FILES], "image": IMAGE_ASSEMBLY}
     pin = pins.get("RELEASE_VLLM_COMMIT", "")
     if not COMMIT.fullmatch(pin):
-        raise ValueError("start.sh carries no release pin yet (tools/set-pin.sh sets it)")
+        raise ValueError("start.sh carries no release pin yet (the recipe generator writes it at release)")
     return {"label": pin, "sources": [(name, pin) for name in ENV_FILES], "image": (IMAGE_TREE,)}
 
 
