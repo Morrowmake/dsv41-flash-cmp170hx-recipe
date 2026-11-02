@@ -189,7 +189,8 @@ def assemble(base, payload, out, pin, tag, env, base_pin, layered=True, parallel
                    "org.opencontainers.image.title": "vllm-cmp170hx",
                    "org.opencontainers.image.base.digest": identity["index"] or identity["manifest"],
                    "org.opencontainers.image.source": "https://github.com/Morrowmake/vllm-cmp170hx",
-                   "org.opencontainers.image.licenses": "Apache-2.0"})
+                   "org.opencontainers.image.licenses": "Apache-2.0 AND MIT",
+                   "org.morrowmake.notices": "/opt/image-tools/THIRD_PARTY_NOTICES"})
     labels.update(extra_labels or {})
     labels.pop("org.opencontainers.image.base.name", None)
     if identity["name"]:

@@ -133,7 +133,8 @@ LABEL org.opencontainers.image.title="vllm-cmp170hx" \
       org.opencontainers.image.revision="${VLLM_COMMIT}" \
       org.opencontainers.image.url="https://github.com/Morrowmake/dsv41-flash-cmp170hx-recipe" \
       org.opencontainers.image.version="${IMAGE_TAG}" \
-      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT" \
+      org.morrowmake.notices="/opt/image-tools/THIRD_PARTY_NOTICES" \
       org.opencontainers.image.base.name="docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04" \
       org.opencontainers.image.base.digest="sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 RUN mkdir -p /opt/cache-seed /recipe /cache /dev/shm /proc /tmp \

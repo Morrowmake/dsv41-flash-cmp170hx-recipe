@@ -20,9 +20,10 @@ The checkpoints' licences are in [model-licences.md](model-licences.md); the
 benchmark prompts are covered in the README's Licences section.
 
 The engine image's notices file (`docker/THIRD_PARTY_NOTICES`, also at
-`/opt/image-tools/THIRD_PARTY_NOTICES` in the image) is updated with these
-entries at the next image build. Until then this page and the plugin's
-`licenses/` directory carry them.
+`/opt/image-tools/THIRD_PARTY_NOTICES` in the image, named by the image label
+`org.morrowmake.notices`) carries the ExLlamaV3, GNmac-lab, Curtis White and
+DeepGEMM notices in full; the plugin's `licenses/` directory carries the
+ExLlamaV3 and Curtis White notices as well.
 
 ## ExLlamaV3 MIT notice
 
