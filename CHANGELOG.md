@@ -8,12 +8,15 @@ PCIe (issue #3). Speed and quality are unchanged from 1.0.1.
 - **Fix.** The sm_80 plugin `vllm_sm80`
   (`e11b375ab98ce84a3ee5792364e21bc25dcc78fa`, tag
   `dsv41-flash-recipe-1.0.2-plugin`) builds the copy-engine all-reduce ring
-  only when PCIe peer access is available, and falls back to NCCL cleanly when
+  only when PCIe peer access is available, and starts without the ring when
   the cards can't share buffers. On those hosts the server now starts without
   `VLLM_SM80_ALLREDUCE=0`. Image
   `ghcr.io/morrowmake/vllm-cmp170hx@sha256:73e79648b5e2a32633885c65ea2e4a83ffcd7f543899ffb890eeef7edbac709d`.
 - **Image notices.** The image's third-party notices now include GNmac-lab,
   ExLlamaV3 and Curtis White; licence label `Apache-2.0 AND MIT`.
+- **Known issue.** A top-level `reasoning_effort` of `minimal`, `medium` or a
+  number is refused with HTTP 400, as in 1.0.1. Use `low`, `high`, `xhigh` or
+  `max`, or a number from 1 to 100 in `chat_template_kwargs`, as documented.
 
 ## 1.0.1 — 2026-11-01
 
