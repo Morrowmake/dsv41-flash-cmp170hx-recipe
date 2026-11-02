@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.2 — 2026-11-02
+
+Fixes the startup crash on hosts where the GPUs can't reach each other over
+PCIe (issue #3). Speed and quality are unchanged from 1.0.1.
+
+- **Fix.** The sm_80 plugin `vllm_sm80`
+  (`e11b375ab98ce84a3ee5792364e21bc25dcc78fa`, tag
+  `dsv41-flash-recipe-1.0.2-plugin`) builds the copy-engine all-reduce ring
+  only when PCIe peer access is available, and falls back to NCCL cleanly when
+  the cards can't share buffers. On those hosts the server now starts without
+  `VLLM_SM80_ALLREDUCE=0`. Image
+  `ghcr.io/morrowmake/vllm-cmp170hx@sha256:73e79648b5e2a32633885c65ea2e4a83ffcd7f543899ffb890eeef7edbac709d`.
+- **Image notices.** The image's third-party notices now include GNmac-lab,
+  ExLlamaV3 and Curtis White; licence label `Apache-2.0 AND MIT`.
+
 ## 1.0.1 — 2026-11-01
 
 Faster decode with more users: each routed expert is now split across the
